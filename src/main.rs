@@ -1,7 +1,9 @@
 mod matmul;
+mod softmax;
 
 use std::error::Error;
 use crate::matmul::matmul;
+use crate::softmax::softmax_cpu;
 
 fn main() -> Result<(), Box<dyn Error>> {
     const N: usize = 4096;
@@ -22,6 +24,11 @@ fn main() -> Result<(), Box<dyn Error>> {
     }
 
     println!("Result verified");
+
+    let mut test_gpu = vec![1.0, 2.0, 3.0];
+    softmax_cpu(&mut test_gpu);
+    println!("Result of softmax_gpu {:?}", test_gpu);
+
 
     Ok(())
 }
