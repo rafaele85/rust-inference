@@ -1,8 +1,10 @@
 mod matmul;
 mod softmax;
 mod scale;
+mod attention;
 
 use std::error::Error;
+use crate::attention::attention;
 use crate::matmul::matmul;
 use crate::scale::scale_gpu;
 use crate::softmax::{softmax_cudnn};
@@ -35,6 +37,15 @@ fn main() -> Result<(), Box<dyn Error>> {
     scale_gpu(&mut test_scale, 0.5);
     println!("Result of scale_gpu {:?}", test_scale);
 
+    let seq_len = 2;
+    const dim: usize = 4;
+    let test_attention = vec![1.0f32; seq_len * dim];
+    let w_q = [1.0; dim * dim];
+    let w_k = [1.0; dim * dim];
+    let w_v = [1.0; dim * dim];
+    let output = attention(&test_attention, &w_q, &w_k, &w_v, seq_len, dim);
+
+    println!("Result of attention {:?}", output);
 
     Ok(())
 }

@@ -18,12 +18,12 @@ pub fn matmul(a_host: Vec<f32>, b_host: Vec<f32>, m: i32, n: i32, k: i32) -> Res
     let config = GemmConfig {
         transa: cublasOperation_t::CUBLAS_OP_N,
         transb: cublasOperation_t::CUBLAS_OP_N,
-        m,
-        n,
+        m: n, // row_major -> column_major
+        n: m, // row_major -> column_major
         k,
         alpha: 1.0f32,
-        lda: k,
-        ldb: n,
+        lda: n,
+        ldb: k,
         ldc: n,
         beta: 0.0f32,
     };
@@ -31,8 +31,8 @@ pub fn matmul(a_host: Vec<f32>, b_host: Vec<f32>, m: i32, n: i32, k: i32) -> Res
     unsafe {
         blas.gemm(
             config,
-            &a_dev,
-            &b_dev,
+            &b_dev, // row_major -> col_major
+            &a_dev, // row_major -> col_major
             &mut c_dev
         )?;
     }
@@ -41,8 +41,6 @@ pub fn matmul(a_host: Vec<f32>, b_host: Vec<f32>, m: i32, n: i32, k: i32) -> Res
     println!("Cublas gemm done");
 
     let c_host: Vec<f32> = stream.memcpy_dtov(&c_dev)?;
-
-    println!("Result {:?}", &c_host[..10]);
 
     Ok(c_host)
 }
