@@ -1,8 +1,10 @@
 mod matmul;
 mod softmax;
+mod scale;
 
 use std::error::Error;
 use crate::matmul::matmul;
+use crate::scale::scale_gpu;
 use crate::softmax::{softmax_cudnn};
 
 fn main() -> Result<(), Box<dyn Error>> {
@@ -28,6 +30,10 @@ fn main() -> Result<(), Box<dyn Error>> {
     let mut test_gpu = vec![1.0, 2.0, 3.0];
     softmax_cudnn(&mut test_gpu);
     println!("Result of softmax_cudnn {:?}", test_gpu);
+
+    let mut test_scale = vec![1.0, 2.0, 3.0, 4.0];
+    scale_gpu(&mut test_scale, 0.5);
+    println!("Result of scale_gpu {:?}", test_scale);
 
 
     Ok(())
