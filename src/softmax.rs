@@ -1,5 +1,11 @@
 use std::error::Error;
-use cudarc::driver::{CudaContext, LaunchConfig, PushKernelArg};
+use std::ffi::c_void;
+use cudarc::cudnn::result::{create_handle, create_tensor_descriptor, set_tensor4d_descriptor, softmax_forward};
+use cudarc::cudnn::sys::cudnnDataType_t::CUDNN_DATA_FLOAT;
+use cudarc::cudnn::sys::cudnnSoftmaxAlgorithm_t::CUDNN_SOFTMAX_ACCURATE;
+use cudarc::cudnn::sys::cudnnSoftmaxMode_t::CUDNN_SOFTMAX_MODE_CHANNEL;
+use cudarc::cudnn::sys::cudnnTensorFormat_t::CUDNN_TENSOR_NCHW;
+use cudarc::driver::{CudaContext, DevicePtr, DevicePtrMut, LaunchConfig, PushKernelArg};
 use cudarc::nvrtc::Ptx;
 
 pub fn softmax_cpu(x: &mut Vec<f32>) {
@@ -42,6 +48,53 @@ pub fn softmax_gpu(x: &mut Vec<f32>) -> Result<(), Box<dyn Error>> {
     stream.synchronize()?;
     let result = stream.memcpy_dtov(&x_dev)?;
     x.copy_from_slice(&result);
+
+    Ok(())
+}
+
+pub fn softmax_cudnn(x: &mut [f32]) -> Result<(), Box<dyn Error>> {
+    let ctx = CudaContext::new(0)?;
+    let stream = ctx.default_stream();
+    let handle = create_handle()?;
+    println!("Cudnn initialized");
+
+    let desc = create_tensor_descriptor()?;
+    let n = x.len() as i32;
+    unsafe {
+        set_tensor4d_descriptor(
+            desc,
+            CUDNN_TENSOR_NCHW, //format NCWH - batch, channels, height, width
+            CUDNN_DATA_FLOAT,
+            [1,n,1,1]
+        );
+    };
+    println!("Cudnn descriptor created");
+    let mut x_dev = stream.memcpy_stod(x)?;
+    let x_ptr = x_dev.device_ptr(&stream).0;
+    let x_ptr_mut = x_dev.device_ptr_mut(&stream).0;
+    println!("Data copied to GPU");
+
+    let alpha: f32 = 1.0;
+    let beta: f32 = 0.0;
+
+    unsafe {
+        softmax_forward(
+            handle,
+            CUDNN_SOFTMAX_ACCURATE,
+            CUDNN_SOFTMAX_MODE_CHANNEL,
+            &alpha as *const f32 as *const c_void,
+            desc,
+            x_ptr as *const c_void,
+            &beta as *const f32 as *const c_void,
+            desc,
+            x_ptr_mut as *mut c_void,
+        );
+    }
+
+    stream.synchronize()?;
+    let result = stream.memcpy_dtov(&x_dev)?;
+    x.copy_from_slice(&result);
+
 
     Ok(())
 }
