@@ -7,7 +7,7 @@ mod head_ops;
 
 use std::error::Error;
 use cudarc::driver::CudaContext;
-use crate::attention::{attention_gpu, attention_multihead};
+use crate::attention::{attention_gpu, attention_multihead, attention_multihead_gpu};
 use crate::gpu_tensor::GpuTensor;
 use crate::head_ops::{combine_heads, extract_head};
 use crate::matmul::{matmul, matmul_gpu, matmul_gpu_bt};
@@ -107,6 +107,17 @@ fn main() -> Result<(), Box<dyn Error>> {
     combine_heads(&mut combined, &head1, 2, 4, 2, 1)?;
 
     println!("combined: {:?}", combined.to_cpu());
+
+    let seq_len = 2;
+
+    let x = GpuTensor::from_cpu(stream3.clone(), &vec![1.0f32; seq_len * dim], vec![seq_len, dim])?;
+    let w_q = GpuTensor::from_cpu(stream3.clone(), &vec![1.0f32; dim * dim], vec![dim, dim])?;
+    let w_k = GpuTensor::from_cpu(stream3.clone(), &vec![1.0f32; dim * dim], vec![dim, dim])?;
+    let w_v = GpuTensor::from_cpu(stream3.clone(), &vec![1.0f32; dim * dim], vec![dim, dim])?;
+    let w_o = GpuTensor::from_cpu(stream3.clone(), &vec![1.0f32; dim * dim], vec![dim, dim])?;
+
+    let output = attention_multihead_gpu(&x, &w_q, &w_k, &w_v, &w_o, seq_len, dim, num_heads)?;
+    println!("Result of multi-head attention {:?}", output.to_cpu()?);
 
     Ok(())
 }

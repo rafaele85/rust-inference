@@ -1,5 +1,6 @@
 use std::error::Error;
 use crate::gpu_tensor::GpuTensor;
+use crate::head_ops::{combine_heads, extract_head};
 use crate::matmul::{matmul, matmul_gpu, matmul_gpu_bt};
 use crate::scale::{scale, scale_gpu};
 use crate::softmax::{softmax_cpu, softmax_cudnn_gpu_2d};
@@ -248,6 +249,88 @@ pub fn attention_gpu(
         seq_len as i32,
         dim as i32,
         seq_len as i32,
+    )?;
+
+    Ok(output)
+}
+
+
+
+pub fn attention_multihead_gpu (
+    x: &GpuTensor,
+    w_q: &GpuTensor,
+    w_k: &GpuTensor,
+    w_v: &GpuTensor,
+    w_o: &GpuTensor,
+    seq_len: usize,
+    dim: usize,
+    num_heads: usize,
+) -> Result<GpuTensor, Box<dyn Error>> {
+
+    let head_dim = dim / num_heads;
+
+    let q = matmul_gpu(
+        x,
+        w_q,
+        seq_len as i32,
+        dim as i32,
+        dim as i32,
+    )?;
+
+    let k = matmul_gpu(
+        x,
+        w_k,
+        seq_len as i32,
+        dim as i32,
+        dim as i32,
+    )?;
+
+    let v = matmul_gpu(
+        x,
+        w_v,
+        seq_len as i32,
+        dim as i32,
+        dim as i32,
+    )?;
+
+    let data_output = vec![0.0f32; seq_len * dim];
+    let mut head_outputs = GpuTensor::from_cpu(x.stream.clone(), &data_output, vec![seq_len, dim])?;
+
+    for h in 0..num_heads {
+        let q_head = extract_head(&q, seq_len, dim, head_dim, h)?;
+        let k_head = extract_head(&k, seq_len, dim, head_dim, h)?;
+        let v_head = extract_head(&v, seq_len, dim, head_dim, h)?;
+
+        let mut scores = matmul_gpu_bt(
+            &q_head,
+            &k_head,
+            seq_len as i32,
+            seq_len as i32,
+            head_dim as i32
+        )?;
+
+        let scale_factor = 1.0 / (head_dim as f32).sqrt();
+        scale_gpu(&mut scores, scale_factor)?;
+        softmax_cudnn_gpu_2d(&mut scores)?;
+
+
+        let head_out = matmul_gpu(
+            &scores,
+            &v_head,
+            seq_len as i32,
+            head_dim as i32,
+            seq_len as i32,
+        )?;
+
+        combine_heads(&mut head_outputs, &head_out, seq_len, dim, head_dim, h)?;
+    }
+
+    let output = matmul_gpu(
+        &head_outputs,
+        &w_o,
+        seq_len as i32,
+        dim as i32,
+        dim as i32
     )?;
 
     Ok(output)
