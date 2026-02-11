@@ -2,10 +2,13 @@ mod matmul;
 mod softmax;
 mod scale;
 mod attention;
+mod gpu_tensor;
 
 use std::error::Error;
+use cudarc::driver::CudaContext;
 use crate::attention::{attention, attention_multihead};
-use crate::matmul::matmul;
+use crate::gpu_tensor::GpuTensor;
+use crate::matmul::{matmul, matmul_gpu};
 use crate::scale::scale_gpu;
 use crate::softmax::{softmax_cudnn};
 
@@ -49,6 +52,15 @@ fn main() -> Result<(), Box<dyn Error>> {
     let output = attention_multihead(&x, &w_q, &w_k, &w_v, &w_o, seq_len, dim, num_heads);
 
     println!("Result of multi-head attention {:?}", output);
+
+    let ctx = CudaContext::new(0)?;
+    let stream = ctx.default_stream();
+
+    let a = GpuTensor::from_cpu(stream.clone(), &vec![1.0f32; 6], vec![2, 3])?;
+    let b = GpuTensor::from_cpu(stream.clone(), &vec![1.0f32; 6], vec![3, 2])?;
+    let c = matmul_gpu(&a, &b, 2, 2, 3)?;
+    let result = c.to_cpu()?;
+    println!("Result of matmul_gpu {:?}", result);
 
     Ok(())
 }
