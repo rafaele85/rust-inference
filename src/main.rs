@@ -14,7 +14,7 @@ use crate::gpu_tensor::GpuTensor;
 use crate::head_ops::{combine_heads, extract_head};
 use crate::matmul::{matmul, matmul_gpu, matmul_gpu_bt};
 use crate::scale::scale_gpu;
-use crate::softmax::{softmax_cudnn, softmax_cudnn_gpu, softmax_cudnn_gpu_2d};
+use crate::softmax::{softmax_cudnn_gpu, softmax_cudnn_gpu_2d};
 
 fn main() -> Result<(), Box<dyn Error>> {
     const N: usize = 4096;
@@ -35,10 +35,6 @@ fn main() -> Result<(), Box<dyn Error>> {
     }
 
     println!("Result verified");
-
-    let mut test_gpu = vec![1.0, 2.0, 3.0];
-    softmax_cudnn(&mut test_gpu);
-    println!("Result of softmax_cudnn {:?}", test_gpu);
 
     let seq_len = 2;
     const dim: usize = 4;
@@ -72,12 +68,12 @@ fn main() -> Result<(), Box<dyn Error>> {
     println!("Result of scale_gpu {:?}", result);
 
     let mut t = GpuTensor::from_cpu(stream.clone(), &vec![1.0, 2.0, 3.0, 4.0], vec![4])?;
-    softmax_cudnn_gpu(&mut t)?;
+    softmax_cudnn_gpu(&mut t, &cuda_kernels)?;
     let result = t.to_cpu()?;
     println!("Result of softmax_cudnn_gpu {:?}", result);
 
     let mut scores = GpuTensor::from_cpu(stream.clone(), &vec![1.0, 2.0, 3.0, 4.0], vec![2, 2])?;
-    softmax_cudnn_gpu_2d(&mut scores)?;
+    softmax_cudnn_gpu_2d(&mut scores, &cuda_kernels)?;
     let result = scores.to_cpu()?;
     println!("Result of softmax_cudnn_gpu_2d {:?}", result);
 
