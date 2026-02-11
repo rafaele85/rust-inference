@@ -4,10 +4,12 @@ mod scale;
 mod attention;
 mod gpu_tensor;
 mod head_ops;
+mod cuda_kernels;
 
 use std::error::Error;
 use cudarc::driver::CudaContext;
 use crate::attention::{attention_gpu, attention_multihead, attention_multihead_gpu};
+use crate::cuda_kernels::CudaKernels;
 use crate::gpu_tensor::GpuTensor;
 use crate::head_ops::{combine_heads, extract_head};
 use crate::matmul::{matmul, matmul_gpu, matmul_gpu_bt};
@@ -60,19 +62,21 @@ fn main() -> Result<(), Box<dyn Error>> {
     let result = c.to_cpu()?;
     println!("Result of matmul_gpu {:?}", result);
 
+
+    let ctx = CudaContext::new(0)?;
+    let cuda_kernels = CudaKernels::new(&ctx)?;
+
     let mut x = GpuTensor::from_cpu(stream.clone(), &vec![2.0f32, 4.0, 6.0, 8.0], vec![4])?;
-    scale_gpu(&mut x, 0.5)?;
+    scale_gpu(&mut x, 0.5, &cuda_kernels)?;
     let result = x.to_cpu()?;
     println!("Result of scale_gpu {:?}", result);
 
-    let mut t = GpuTensor::from_cpu(stream, &vec![1.0, 2.0, 3.0, 4.0], vec![4])?;
+    let mut t = GpuTensor::from_cpu(stream.clone(), &vec![1.0, 2.0, 3.0, 4.0], vec![4])?;
     softmax_cudnn_gpu(&mut t)?;
     let result = t.to_cpu()?;
     println!("Result of softmax_cudnn_gpu {:?}", result);
 
-    let stream2 = ctx.default_stream();
-
-    let mut scores = GpuTensor::from_cpu(stream2, &vec![1.0, 2.0, 3.0, 4.0], vec![2, 2])?;
+    let mut scores = GpuTensor::from_cpu(stream.clone(), &vec![1.0, 2.0, 3.0, 4.0], vec![2, 2])?;
     softmax_cudnn_gpu_2d(&mut scores)?;
     let result = scores.to_cpu()?;
     println!("Result of softmax_cudnn_gpu_2d {:?}", result);
@@ -92,19 +96,19 @@ fn main() -> Result<(), Box<dyn Error>> {
     let w_k = GpuTensor::from_cpu(stream3.clone(), &vec![1.0f32; dim * dim], vec![dim, dim])?;
     let w_v = GpuTensor::from_cpu(stream3.clone(), &vec![1.0f32; dim * dim], vec![dim, dim])?;
 
-    let output = attention_gpu(&x, &w_q, &w_k, &w_v, seq_len, dim)?;
+    let output = attention_gpu(&x, &w_q, &w_k, &w_v, seq_len, dim, &cuda_kernels)?;
     println!("attention_gpu: {:?}", output.to_cpu()?);
 
     let data = [1.0f32, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0];
     let t = GpuTensor::from_cpu(stream3.clone(), &data, vec![2, 4])?;
-    let head0 = extract_head(&t, 2, 4, 2, 0)?;
+    let head0 = extract_head(&t, 2, 4, 2, 0, &cuda_kernels)?;
     println!("head0: {:?}", head0.to_cpu());
-    let head1 = extract_head(&t, 2, 4, 2, 1)?;
+    let head1 = extract_head(&t, 2, 4, 2, 1, &cuda_kernels)?;
     println!("head1: {:?}", head1.to_cpu());
 
     let mut combined = GpuTensor::from_cpu(stream3.clone(), &vec![0.0f32; 8], vec![2, 4])?;
-    combine_heads(&mut combined, &head0, 2, 4, 2, 0)?;
-    combine_heads(&mut combined, &head1, 2, 4, 2, 1)?;
+    combine_heads(&mut combined, &head0, 2, 4, 2, 0, &cuda_kernels)?;
+    combine_heads(&mut combined, &head1, 2, 4, 2, 1, &cuda_kernels)?;
 
     println!("combined: {:?}", combined.to_cpu());
 
@@ -116,7 +120,7 @@ fn main() -> Result<(), Box<dyn Error>> {
     let w_v = GpuTensor::from_cpu(stream3.clone(), &vec![1.0f32; dim * dim], vec![dim, dim])?;
     let w_o = GpuTensor::from_cpu(stream3.clone(), &vec![1.0f32; dim * dim], vec![dim, dim])?;
 
-    let output = attention_multihead_gpu(&x, &w_q, &w_k, &w_v, &w_o, seq_len, dim, num_heads)?;
+    let output = attention_multihead_gpu(&x, &w_q, &w_k, &w_v, &w_o, seq_len, dim, num_heads, &cuda_kernels)?;
     println!("Result of multi-head attention {:?}", output.to_cpu()?);
 
     Ok(())

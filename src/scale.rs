@@ -1,6 +1,7 @@
 use std::error::Error;
 use cudarc::driver::{CudaContext, LaunchConfig, PushKernelArg};
 use cudarc::nvrtc::Ptx;
+use crate::cuda_kernels::CudaKernels;
 use crate::gpu_tensor::GpuTensor;
 
 pub fn scale(x: &mut Vec<f32>, factor: f32) -> Result<(), Box<dyn Error>> {
@@ -38,11 +39,8 @@ pub fn scale(x: &mut Vec<f32>, factor: f32) -> Result<(), Box<dyn Error>> {
 
 
 
-pub fn scale_gpu(x: &mut GpuTensor, factor: f32) -> Result<(), Box<dyn Error>> {
-    let ctx = CudaContext::new(0)?;
-    let ptx = Ptx::from_file("scale.ptx");
-    let module = ctx.load_module(ptx)?;
-    let kernel = module.load_function("scale")?;
+pub fn scale_gpu(x: &mut GpuTensor, factor: f32, cuda_kernels: &CudaKernels) -> Result<(), Box<dyn Error>> {
+    let kernel = &cuda_kernels.scale;
 
     let n = x.len() as i32;
 

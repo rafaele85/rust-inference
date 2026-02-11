@@ -1,4 +1,5 @@
 use std::error::Error;
+use crate::cuda_kernels::CudaKernels;
 use crate::gpu_tensor::GpuTensor;
 use crate::head_ops::{combine_heads, extract_head};
 use crate::matmul::{matmul, matmul_gpu, matmul_gpu_bt};
@@ -203,6 +204,7 @@ pub fn attention_gpu(
     w_v: &GpuTensor,
     seq_len: usize,
     dim: usize,
+    cuda_kernels: &CudaKernels
 ) -> Result<GpuTensor, Box<dyn Error>> {
     let q = matmul_gpu(
         x,
@@ -239,7 +241,7 @@ pub fn attention_gpu(
 
     let scale_factor = 1.0 / (dim as f32).sqrt();
     let mut scores = scores;
-    scale_gpu(&mut scores, scale_factor)?;
+    scale_gpu(&mut scores, scale_factor, &cuda_kernels)?;
 
     softmax_cudnn_gpu_2d(&mut scores)?;
 
@@ -265,6 +267,7 @@ pub fn attention_multihead_gpu (
     seq_len: usize,
     dim: usize,
     num_heads: usize,
+    cuda_kernels: &CudaKernels
 ) -> Result<GpuTensor, Box<dyn Error>> {
 
     let head_dim = dim / num_heads;
@@ -297,9 +300,9 @@ pub fn attention_multihead_gpu (
     let mut head_outputs = GpuTensor::from_cpu(x.stream.clone(), &data_output, vec![seq_len, dim])?;
 
     for h in 0..num_heads {
-        let q_head = extract_head(&q, seq_len, dim, head_dim, h)?;
-        let k_head = extract_head(&k, seq_len, dim, head_dim, h)?;
-        let v_head = extract_head(&v, seq_len, dim, head_dim, h)?;
+        let q_head = extract_head(&q, seq_len, dim, head_dim, h, &cuda_kernels)?;
+        let k_head = extract_head(&k, seq_len, dim, head_dim, h, &cuda_kernels)?;
+        let v_head = extract_head(&v, seq_len, dim, head_dim, h, &cuda_kernels)?;
 
         let mut scores = matmul_gpu_bt(
             &q_head,
@@ -310,7 +313,7 @@ pub fn attention_multihead_gpu (
         )?;
 
         let scale_factor = 1.0 / (head_dim as f32).sqrt();
-        scale_gpu(&mut scores, scale_factor)?;
+        scale_gpu(&mut scores, scale_factor, &cuda_kernels)?;
         softmax_cudnn_gpu_2d(&mut scores)?;
 
 
@@ -322,7 +325,7 @@ pub fn attention_multihead_gpu (
             seq_len as i32,
         )?;
 
-        combine_heads(&mut head_outputs, &head_out, seq_len, dim, head_dim, h)?;
+        combine_heads(&mut head_outputs, &head_out, seq_len, dim, head_dim, h, &cuda_kernels)?;
     }
 
     let output = matmul_gpu(
