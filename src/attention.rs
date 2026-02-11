@@ -1,6 +1,6 @@
 use std::error::Error;
 use crate::matmul::matmul;
-use crate::scale::scale_gpu;
+use crate::scale::scale;
 use crate::softmax::softmax_cpu;
 
 pub fn attention(
@@ -60,7 +60,7 @@ pub fn attention(
 
     let scale_factor = 1.0 / (dim as f32).sqrt();
     let mut scores = scores;
-    scale_gpu(&mut scores, scale_factor);
+    scale(&mut scores, scale_factor);
 
     for i in 0..seq_len {
         let start = i * seq_len;

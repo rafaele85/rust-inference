@@ -36,10 +36,6 @@ fn main() -> Result<(), Box<dyn Error>> {
     softmax_cudnn(&mut test_gpu);
     println!("Result of softmax_cudnn {:?}", test_gpu);
 
-    let mut test_scale = vec![1.0, 2.0, 3.0, 4.0];
-    scale_gpu(&mut test_scale, 0.5);
-    println!("Result of scale_gpu {:?}", test_scale);
-
     let seq_len = 2;
     const dim: usize = 4;
     const num_heads: usize = 2;
@@ -61,6 +57,11 @@ fn main() -> Result<(), Box<dyn Error>> {
     let c = matmul_gpu(&a, &b, 2, 2, 3)?;
     let result = c.to_cpu()?;
     println!("Result of matmul_gpu {:?}", result);
+
+    let mut x = GpuTensor::from_cpu(stream.clone(), &vec![2.0f32, 4.0, 6.0, 8.0], vec![4])?;
+    scale_gpu(&mut x, 0.5)?;
+    let result = x.to_cpu()?;
+    println!("Result of scale_gpu {:?}", result);
 
     Ok(())
 }
