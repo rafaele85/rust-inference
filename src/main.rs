@@ -3,11 +3,13 @@ mod softmax;
 mod scale;
 mod attention;
 mod gpu_tensor;
+mod head_ops;
 
 use std::error::Error;
 use cudarc::driver::CudaContext;
 use crate::attention::{attention_gpu, attention_multihead};
 use crate::gpu_tensor::GpuTensor;
+use crate::head_ops::{combine_heads, extract_head};
 use crate::matmul::{matmul, matmul_gpu, matmul_gpu_bt};
 use crate::scale::scale_gpu;
 use crate::softmax::{softmax_cudnn, softmax_cudnn_gpu, softmax_cudnn_gpu_2d};
@@ -92,6 +94,19 @@ fn main() -> Result<(), Box<dyn Error>> {
 
     let output = attention_gpu(&x, &w_q, &w_k, &w_v, seq_len, dim)?;
     println!("attention_gpu: {:?}", output.to_cpu()?);
+
+    let data = [1.0f32, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0];
+    let t = GpuTensor::from_cpu(stream3.clone(), &data, vec![2, 4])?;
+    let head0 = extract_head(&t, 2, 4, 2, 0)?;
+    println!("head0: {:?}", head0.to_cpu());
+    let head1 = extract_head(&t, 2, 4, 2, 1)?;
+    println!("head1: {:?}", head1.to_cpu());
+
+    let mut combined = GpuTensor::from_cpu(stream3.clone(), &vec![0.0f32; 8], vec![2, 4])?;
+    combine_heads(&mut combined, &head0, 2, 4, 2, 0)?;
+    combine_heads(&mut combined, &head1, 2, 4, 2, 1)?;
+
+    println!("combined: {:?}", combined.to_cpu());
 
     Ok(())
 }
