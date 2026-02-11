@@ -5,6 +5,7 @@ mod attention;
 mod gpu_tensor;
 mod head_ops;
 mod cuda_kernels;
+mod residual;
 
 use std::error::Error;
 use cudarc::driver::CudaContext;
@@ -13,6 +14,7 @@ use crate::cuda_kernels::CudaKernels;
 use crate::gpu_tensor::GpuTensor;
 use crate::head_ops::{combine_heads, extract_head};
 use crate::matmul::{matmul, matmul_gpu, matmul_gpu_bt};
+use crate::residual::residual_add;
 use crate::scale::scale_gpu;
 use crate::softmax::{softmax_cudnn_gpu, softmax_cudnn_gpu_2d};
 
@@ -118,6 +120,12 @@ fn main() -> Result<(), Box<dyn Error>> {
 
     let output = attention_multihead_gpu(&x, &w_q, &w_k, &w_v, &w_o, seq_len, dim, num_heads, &cuda_kernels)?;
     println!("Result of multi-head attention {:?}", output.to_cpu()?);
+
+    let mut a = GpuTensor::from_cpu(stream3.clone(), &vec![1.0f32, 2.0, 3.0, 4.0], vec![4])?;
+    let b = GpuTensor::from_cpu(stream3.clone(), &vec![10.0f32, 20.0, 30.0, 40.0], vec![4])?;
+    residual_add(&mut a, &b, &cuda_kernels)?;
+    println!("Result of multi-head residual attention {:?}", a.to_cpu()?);
+
 
     Ok(())
 }
