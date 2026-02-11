@@ -4,7 +4,7 @@ mod scale;
 mod attention;
 
 use std::error::Error;
-use crate::attention::attention;
+use crate::attention::{attention, attention_multihead};
 use crate::matmul::matmul;
 use crate::scale::scale_gpu;
 use crate::softmax::{softmax_cudnn};
@@ -39,13 +39,16 @@ fn main() -> Result<(), Box<dyn Error>> {
 
     let seq_len = 2;
     const dim: usize = 4;
-    let test_attention = vec![1.0f32; seq_len * dim];
+    const num_heads: usize = 2;
+
+    let x = vec![1.0f32; seq_len * dim];
     let w_q = [1.0; dim * dim];
     let w_k = [1.0; dim * dim];
     let w_v = [1.0; dim * dim];
-    let output = attention(&test_attention, &w_q, &w_k, &w_v, seq_len, dim);
+    let w_o = [1.0; dim * dim];
+    let output = attention_multihead(&x, &w_q, &w_k, &w_v, &w_o, seq_len, dim, num_heads);
 
-    println!("Result of attention {:?}", output);
+    println!("Result of multi-head attention {:?}", output);
 
     Ok(())
 }
