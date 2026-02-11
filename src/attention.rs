@@ -3,7 +3,7 @@ use crate::cuda_kernels::CudaKernels;
 use crate::gpu_tensor::GpuTensor;
 use crate::head_ops::{combine_heads, extract_head};
 use crate::matmul::{matmul, matmul_gpu, matmul_gpu_bt};
-use crate::scale::{scale, scale_gpu};
+use crate::scale::{scale_gpu};
 use crate::softmax::{softmax_cpu, softmax_cudnn_gpu_2d};
 
 

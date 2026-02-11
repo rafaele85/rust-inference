@@ -17,9 +17,9 @@ pub struct CudaKernels {
 
 impl CudaKernels {
     pub fn new(ctx: &Arc<CudaContext>) -> Result<Self, Box<dyn Error>> {
-        let scale_module = ctx.load_module(Ptx::from_file("scale.ptx"))?;
-        let head_ops_module = ctx.load_module(Ptx::from_file("head_ops.ptx"))?;
-        let residual_module = ctx.load_module(Ptx::from_file("residual.ptx"))?;
+        let scale_module = ctx.load_module(Ptx::from_file("kernels/scale.ptx"))?;
+        let head_ops_module = ctx.load_module(Ptx::from_file("kernels/head_ops.ptx"))?;
+        let residual_module = ctx.load_module(Ptx::from_file("kernels/residual.ptx"))?;
         Ok(Self {
             scale: scale_module.load_function("scale")?,
             extract_head: head_ops_module.load_function("extract_head")?,
