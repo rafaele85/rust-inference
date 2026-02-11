@@ -6,11 +6,11 @@ mod gpu_tensor;
 
 use std::error::Error;
 use cudarc::driver::CudaContext;
-use crate::attention::{attention, attention_multihead};
+use crate::attention::{attention_multihead};
 use crate::gpu_tensor::GpuTensor;
 use crate::matmul::{matmul, matmul_gpu};
 use crate::scale::scale_gpu;
-use crate::softmax::{softmax_cudnn, softmax_cudnn_gpu};
+use crate::softmax::{softmax_cudnn, softmax_cudnn_gpu, softmax_cudnn_gpu_2d};
 
 fn main() -> Result<(), Box<dyn Error>> {
     const N: usize = 4096;
@@ -67,6 +67,14 @@ fn main() -> Result<(), Box<dyn Error>> {
     softmax_cudnn_gpu(&mut t)?;
     let result = t.to_cpu()?;
     println!("Result of softmax_cudnn_gpu {:?}", result);
+
+    let stream2 = ctx.default_stream();
+
+    let mut scores = GpuTensor::from_cpu(stream2, &vec![1.0, 2.0, 3.0, 4.0], vec![2, 2])?;
+    softmax_cudnn_gpu_2d(&mut scores)?;
+    let result = scores.to_cpu()?;
+    println!("Result of softmax_cudnn_gpu_2d {:?}", result);
+
 
     Ok(())
 }
