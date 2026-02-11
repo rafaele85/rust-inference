@@ -10,7 +10,7 @@ use crate::attention::{attention, attention_multihead};
 use crate::gpu_tensor::GpuTensor;
 use crate::matmul::{matmul, matmul_gpu};
 use crate::scale::scale_gpu;
-use crate::softmax::{softmax_cudnn};
+use crate::softmax::{softmax_cudnn, softmax_cudnn_gpu};
 
 fn main() -> Result<(), Box<dyn Error>> {
     const N: usize = 4096;
@@ -62,6 +62,11 @@ fn main() -> Result<(), Box<dyn Error>> {
     scale_gpu(&mut x, 0.5)?;
     let result = x.to_cpu()?;
     println!("Result of scale_gpu {:?}", result);
+
+    let mut t = GpuTensor::from_cpu(stream, &vec![1.0, 2.0, 3.0, 4.0], vec![4])?;
+    softmax_cudnn_gpu(&mut t)?;
+    let result = t.to_cpu()?;
+    println!("Result of softmax_cudnn_gpu {:?}", result);
 
     Ok(())
 }

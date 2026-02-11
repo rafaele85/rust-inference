@@ -7,6 +7,7 @@ use cudarc::cudnn::sys::cudnnSoftmaxMode_t::CUDNN_SOFTMAX_MODE_CHANNEL;
 use cudarc::cudnn::sys::cudnnTensorFormat_t::CUDNN_TENSOR_NCHW;
 use cudarc::driver::{CudaContext, DevicePtr, DevicePtrMut, LaunchConfig, PushKernelArg};
 use cudarc::nvrtc::Ptx;
+use crate::gpu_tensor::GpuTensor;
 
 pub fn softmax_cpu(x: &mut Vec<f32>) {
     let max = x.iter().cloned().fold(f32::NEG_INFINITY, f32::max);
@@ -95,6 +96,45 @@ pub fn softmax_cudnn(x: &mut [f32]) -> Result<(), Box<dyn Error>> {
     let result = stream.memcpy_dtov(&x_dev)?;
     x.copy_from_slice(&result);
 
+
+    Ok(())
+}
+
+
+pub fn softmax_cudnn_gpu(x: &mut GpuTensor) -> Result<(), Box<dyn Error>> {
+    let handle = create_handle()?;
+
+    let desc = create_tensor_descriptor()?;
+    let n = x.len() as i32;
+    unsafe {
+        set_tensor4d_descriptor(
+            desc,
+            CUDNN_TENSOR_NCHW, //format NCWH - batch, channels, height, width
+            CUDNN_DATA_FLOAT,
+            [1,n,1,1]
+        );
+    };
+
+    let x_ptr = x.data.device_ptr(&x.stream).0;
+    let x_ptr_mut = x.data.device_ptr_mut(&x.stream).0;
+
+    let alpha: f32 = 1.0;
+    let beta: f32 = 0.0;
+
+    unsafe {
+        softmax_forward(
+            handle,
+            CUDNN_SOFTMAX_ACCURATE,
+            CUDNN_SOFTMAX_MODE_CHANNEL,
+            &alpha as *const f32 as *const c_void,
+            desc,
+            x_ptr as *const c_void,
+            &beta as *const f32 as *const c_void,
+            desc,
+            x_ptr_mut as *mut c_void,
+        );
+
+    }
 
     Ok(())
 }
