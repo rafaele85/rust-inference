@@ -1,7 +1,8 @@
 use std::error::Error;
-use crate::matmul::{matmul, matmul_gpu};
+use crate::gpu_tensor::GpuTensor;
+use crate::matmul::{matmul, matmul_gpu, matmul_gpu_bt};
 use crate::scale::{scale, scale_gpu};
-use crate::softmax::softmax_cpu;
+use crate::softmax::{softmax_cpu, softmax_cudnn_gpu_2d};
 
 pub fn attention(
     x: &[f32],
@@ -194,8 +195,6 @@ pub fn attention_multihead (
     Ok(output.to_vec())
 }
 
-/*
-
 pub fn attention_gpu(
     x: &GpuTensor,
     w_q: &GpuTensor,
@@ -228,18 +227,10 @@ pub fn attention_gpu(
         dim as i32,
     )?;
 
-    let mut data = vec![0.0; dim * seq_len];
-    for i in 0..seq_len {
-        for j in 0..dim {
-            data[j * seq_len + i] = k[i * dim + j];
-        }
-    }
 
-    println!("transpose done. q len: {}, k_t len: {}", q.len(), k_t.len());
-
-    let scores = matmul(
-        q,
-        k_t,
+    let scores = matmul_gpu_bt(
+        &q,
+        &k,
         seq_len as i32,
         seq_len as i32,
         dim as i32
@@ -247,19 +238,13 @@ pub fn attention_gpu(
 
     let scale_factor = 1.0 / (dim as f32).sqrt();
     let mut scores = scores;
-    scale(&mut scores, scale_factor);
+    scale_gpu(&mut scores, scale_factor)?;
 
-    for i in 0..seq_len {
-        let start = i * seq_len;
-        let end = start + seq_len;
-        let mut row = scores[start..end].to_vec();
-        softmax_cpu(&mut row);
-        scores[start..end].copy_from_slice(&row);
-    }
+    softmax_cudnn_gpu_2d(&mut scores)?;
 
-    let output = matmul(
-        scores,
-        v,
+    let output = matmul_gpu(
+        &scores,
+        &v,
         seq_len as i32,
         dim as i32,
         seq_len as i32,
@@ -267,4 +252,3 @@ pub fn attention_gpu(
 
     Ok(output)
 }
-*/

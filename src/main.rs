@@ -6,7 +6,7 @@ mod gpu_tensor;
 
 use std::error::Error;
 use cudarc::driver::CudaContext;
-use crate::attention::{attention_multihead};
+use crate::attention::{attention_gpu, attention_multihead};
 use crate::gpu_tensor::GpuTensor;
 use crate::matmul::{matmul, matmul_gpu, matmul_gpu_bt};
 use crate::scale::scale_gpu;
@@ -84,6 +84,14 @@ fn main() -> Result<(), Box<dyn Error>> {
     let scores = matmul_gpu_bt(&q, &k, 2, 2, 3)?;
     println!("matmul_gpu_bt: {:?}", scores.to_cpu()?);
 
+    let seq_len = 2;
+    let x = GpuTensor::from_cpu(stream3.clone(), &vec![1.0f32; seq_len * dim], vec![seq_len, dim])?;
+    let w_q = GpuTensor::from_cpu(stream3.clone(), &vec![1.0f32; dim * dim], vec![dim, dim])?;
+    let w_k = GpuTensor::from_cpu(stream3.clone(), &vec![1.0f32; dim * dim], vec![dim, dim])?;
+    let w_v = GpuTensor::from_cpu(stream3.clone(), &vec![1.0f32; dim * dim], vec![dim, dim])?;
+
+    let output = attention_gpu(&x, &w_q, &w_k, &w_v, seq_len, dim)?;
+    println!("attention_gpu: {:?}", output.to_cpu()?);
 
     Ok(())
 }
