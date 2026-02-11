@@ -28,4 +28,9 @@ impl GpuTensor {
     pub fn len(&self) -> usize {
         self.shape.iter().product()
     }
+
+    pub fn alloc_zeros(stream: Arc<CudaStream>, len: usize, shape: Vec<usize>) -> Result<Self, Box<dyn Error>> {
+        let data = stream.alloc_zeros::<f32>(len)?;
+        Ok(Self { data, shape, stream })
+    }
 }

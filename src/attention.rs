@@ -296,8 +296,7 @@ pub fn attention_multihead_gpu (
         dim as i32,
     )?;
 
-    let data_output = vec![0.0f32; seq_len * dim];
-    let mut head_outputs = GpuTensor::from_cpu(x.stream.clone(), &data_output, vec![seq_len, dim])?;
+    let mut head_outputs = GpuTensor::alloc_zeros(x.stream.clone(), seq_len * dim, vec![seq_len, dim])?;
 
     for h in 0..num_heads {
         let q_head = extract_head(&q, seq_len, dim, head_dim, h, &cuda_kernels)?;
