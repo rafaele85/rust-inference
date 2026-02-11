@@ -81,3 +81,41 @@ pub fn matmul_gpu(a: &GpuTensor, b: &GpuTensor, m: i32, n: i32, k: i32) -> Resul
         shape: vec![m as usize, n as usize],
     })
 }
+
+
+
+
+
+pub fn matmul_gpu_bt(a: &GpuTensor, b: &GpuTensor, m: i32, n: i32, k: i32) -> Result<GpuTensor, Box<dyn Error>> {
+    let blas = CudaBlas::new(a.stream.clone())?;
+
+    let mut c_data = a.stream.alloc_zeros::<f32>(m as usize * n as usize)?;
+
+    let config = GemmConfig {
+        transa: cublasOperation_t::CUBLAS_OP_T,
+        transb: cublasOperation_t::CUBLAS_OP_N,
+        m: n, // row_major -> column_major
+        n: m, // row_major -> column_major
+        k,
+        alpha: 1.0f32,
+        lda: k,
+        ldb: k,
+        ldc: n,
+        beta: 0.0f32,
+    };
+
+    unsafe {
+        blas.gemm(
+            config,
+            &b.data, // row_major -> col_major
+            &a.data, // row_major -> col_major
+            &mut c_data
+        )?;
+    }
+
+    Ok(GpuTensor {
+        data: c_data,
+        stream: a.stream.clone(),
+        shape: vec![m as usize, n as usize],
+    })
+}

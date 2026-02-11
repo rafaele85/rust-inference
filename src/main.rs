@@ -8,7 +8,7 @@ use std::error::Error;
 use cudarc::driver::CudaContext;
 use crate::attention::{attention_multihead};
 use crate::gpu_tensor::GpuTensor;
-use crate::matmul::{matmul, matmul_gpu};
+use crate::matmul::{matmul, matmul_gpu, matmul_gpu_bt};
 use crate::scale::scale_gpu;
 use crate::softmax::{softmax_cudnn, softmax_cudnn_gpu, softmax_cudnn_gpu_2d};
 
@@ -74,6 +74,15 @@ fn main() -> Result<(), Box<dyn Error>> {
     softmax_cudnn_gpu_2d(&mut scores)?;
     let result = scores.to_cpu()?;
     println!("Result of softmax_cudnn_gpu_2d {:?}", result);
+
+
+    let stream3 = ctx.default_stream();
+    let q = GpuTensor::from_cpu(stream3.clone(), &vec![1.0f32, 2.0, 3.0, 4.0, 5.0, 6.0], vec![2, 3])?;
+    // K: 2x3 matrix (will be transposed to 3x2)
+    let k = GpuTensor::from_cpu(stream3.clone(), &vec![1.0f32, 2.0, 3.0, 4.0, 5.0, 6.0], vec![2, 3])?;
+
+    let scores = matmul_gpu_bt(&q, &k, 2, 2, 3)?;
+    println!("matmul_gpu_bt: {:?}", scores.to_cpu()?);
 
 
     Ok(())
