@@ -1,12 +1,14 @@
 use std::error::Error;
 use std::sync::Arc;
+use cudarc::cublas::CudaBlas;
 use cudarc::driver::{CudaContext, CudaFunction};
 use cudarc::nvrtc::Ptx;
 
 pub struct CudaKernels {
     pub scale: CudaFunction,
     pub extract_head: CudaFunction,
-    pub combine_heads: CudaFunction
+    pub combine_heads: CudaFunction,
+    pub blas: CudaBlas
 }
 
 impl CudaKernels {
@@ -17,6 +19,7 @@ impl CudaKernels {
             scale: scale_module.load_function("scale")?,
             extract_head: head_ops_module.load_function("extract_head")?,
             combine_heads: head_ops_module.load_function("combine_heads")?,
+            blas: CudaBlas::new(ctx.default_stream())?
         })
     }
 }

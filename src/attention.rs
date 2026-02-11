@@ -212,6 +212,7 @@ pub fn attention_gpu(
         seq_len as i32,
         dim as i32,
         dim as i32,
+        &cuda_kernels
     )?;
 
     let k = matmul_gpu(
@@ -220,6 +221,7 @@ pub fn attention_gpu(
         seq_len as i32,
         dim as i32,
         dim as i32,
+        &cuda_kernels
     )?;
 
     let v = matmul_gpu(
@@ -228,6 +230,7 @@ pub fn attention_gpu(
         seq_len as i32,
         dim as i32,
         dim as i32,
+        &cuda_kernels
     )?;
 
 
@@ -236,7 +239,8 @@ pub fn attention_gpu(
         &k,
         seq_len as i32,
         seq_len as i32,
-        dim as i32
+        dim as i32,
+        &cuda_kernels
     )?;
 
     let scale_factor = 1.0 / (dim as f32).sqrt();
@@ -251,6 +255,7 @@ pub fn attention_gpu(
         seq_len as i32,
         dim as i32,
         seq_len as i32,
+        &cuda_kernels
     )?;
 
     Ok(output)
@@ -278,6 +283,7 @@ pub fn attention_multihead_gpu (
         seq_len as i32,
         dim as i32,
         dim as i32,
+        &cuda_kernels
     )?;
 
     let k = matmul_gpu(
@@ -286,6 +292,7 @@ pub fn attention_multihead_gpu (
         seq_len as i32,
         dim as i32,
         dim as i32,
+        &cuda_kernels
     )?;
 
     let v = matmul_gpu(
@@ -294,6 +301,7 @@ pub fn attention_multihead_gpu (
         seq_len as i32,
         dim as i32,
         dim as i32,
+        &cuda_kernels
     )?;
 
     let mut head_outputs = GpuTensor::alloc_zeros(x.stream.clone(), seq_len * dim, vec![seq_len, dim])?;
@@ -308,7 +316,8 @@ pub fn attention_multihead_gpu (
             &k_head,
             seq_len as i32,
             seq_len as i32,
-            head_dim as i32
+            head_dim as i32,
+            &cuda_kernels
         )?;
 
         let scale_factor = 1.0 / (head_dim as f32).sqrt();
@@ -322,6 +331,7 @@ pub fn attention_multihead_gpu (
             seq_len as i32,
             head_dim as i32,
             seq_len as i32,
+            &cuda_kernels
         )?;
 
         combine_heads(&mut head_outputs, &head_out, seq_len, dim, head_dim, h, &cuda_kernels)?;
@@ -332,7 +342,8 @@ pub fn attention_multihead_gpu (
         &w_o,
         seq_len as i32,
         dim as i32,
-        dim as i32
+        dim as i32,
+        &cuda_kernels
     )?;
 
     Ok(output)

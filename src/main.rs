@@ -55,16 +55,16 @@ fn main() -> Result<(), Box<dyn Error>> {
 
     let ctx = CudaContext::new(0)?;
     let stream = ctx.default_stream();
+    let cuda_kernels = CudaKernels::new(&ctx)?;
+
 
     let a = GpuTensor::from_cpu(stream.clone(), &vec![1.0f32; 6], vec![2, 3])?;
     let b = GpuTensor::from_cpu(stream.clone(), &vec![1.0f32; 6], vec![3, 2])?;
-    let c = matmul_gpu(&a, &b, 2, 2, 3)?;
+    let c = matmul_gpu(&a, &b, 2, 2, 3, &cuda_kernels)?;
     let result = c.to_cpu()?;
     println!("Result of matmul_gpu {:?}", result);
 
 
-    let ctx = CudaContext::new(0)?;
-    let cuda_kernels = CudaKernels::new(&ctx)?;
 
     let mut x = GpuTensor::from_cpu(stream.clone(), &vec![2.0f32, 4.0, 6.0, 8.0], vec![4])?;
     scale_gpu(&mut x, 0.5, &cuda_kernels)?;
@@ -87,7 +87,7 @@ fn main() -> Result<(), Box<dyn Error>> {
     // K: 2x3 matrix (will be transposed to 3x2)
     let k = GpuTensor::from_cpu(stream3.clone(), &vec![1.0f32, 2.0, 3.0, 4.0, 5.0, 6.0], vec![2, 3])?;
 
-    let scores = matmul_gpu_bt(&q, &k, 2, 2, 3)?;
+    let scores = matmul_gpu_bt(&q, &k, 2, 2, 3, &cuda_kernels)?;
     println!("matmul_gpu_bt: {:?}", scores.to_cpu()?);
 
     let seq_len = 2;

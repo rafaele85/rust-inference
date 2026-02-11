@@ -2,6 +2,7 @@ use std::error::Error;
 use cudarc::cublas::{CudaBlas, Gemm, GemmConfig};
 use cudarc::cublas::sys::cublasOperation_t;
 use cudarc::driver::CudaContext;
+use crate::cuda_kernels::CudaKernels;
 use crate::gpu_tensor::GpuTensor;
 
 pub fn matmul(a_host: Vec<f32>, b_host: Vec<f32>, m: i32, n: i32, k: i32) -> Result<Vec<f32>, Box<dyn Error>> {
@@ -48,8 +49,7 @@ pub fn matmul(a_host: Vec<f32>, b_host: Vec<f32>, m: i32, n: i32, k: i32) -> Res
 
 
 
-pub fn matmul_gpu(a: &GpuTensor, b: &GpuTensor, m: i32, n: i32, k: i32) -> Result<GpuTensor, Box<dyn Error>> {
-    let blas = CudaBlas::new(a.stream.clone())?;
+pub fn matmul_gpu(a: &GpuTensor, b: &GpuTensor, m: i32, n: i32, k: i32, cuda_kernels: &CudaKernels) -> Result<GpuTensor, Box<dyn Error>> {
 
     let mut c_data = a.stream.alloc_zeros::<f32>(m as usize * n as usize)?;
 
@@ -67,7 +67,7 @@ pub fn matmul_gpu(a: &GpuTensor, b: &GpuTensor, m: i32, n: i32, k: i32) -> Resul
     };
 
     unsafe {
-        blas.gemm(
+        cuda_kernels.blas.gemm(
             config,
             &b.data, // row_major -> col_major
             &a.data, // row_major -> col_major
@@ -86,9 +86,7 @@ pub fn matmul_gpu(a: &GpuTensor, b: &GpuTensor, m: i32, n: i32, k: i32) -> Resul
 
 
 
-pub fn matmul_gpu_bt(a: &GpuTensor, b: &GpuTensor, m: i32, n: i32, k: i32) -> Result<GpuTensor, Box<dyn Error>> {
-    let blas = CudaBlas::new(a.stream.clone())?;
-
+pub fn matmul_gpu_bt(a: &GpuTensor, b: &GpuTensor, m: i32, n: i32, k: i32, cuda_kernels: &CudaKernels) -> Result<GpuTensor, Box<dyn Error>> {
     let mut c_data = a.stream.alloc_zeros::<f32>(m as usize * n as usize)?;
 
     let config = GemmConfig {
@@ -105,7 +103,7 @@ pub fn matmul_gpu_bt(a: &GpuTensor, b: &GpuTensor, m: i32, n: i32, k: i32) -> Re
     };
 
     unsafe {
-        blas.gemm(
+        cuda_kernels.blas.gemm(
             config,
             &b.data, // row_major -> col_major
             &a.data, // row_major -> col_major
