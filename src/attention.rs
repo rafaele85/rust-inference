@@ -1,5 +1,5 @@
 use std::error::Error;
-use crate::cuda_kernels::CudaKernels;
+use crate::cuda_kernels::{get_kernels};
 use crate::gpu_tensor::GpuTensor;
 use crate::head_ops::{combine_heads, extract_head};
 use crate::matmul::{matmul, matmul_gpu, matmul_gpu_bt};
@@ -125,16 +125,15 @@ pub fn attention_gpu(
     w_k: &GpuTensor,
     w_v: &GpuTensor,
     seq_len: usize,
-    dim: usize,
-    cuda_kernels: &CudaKernels
+    dim: usize
 ) -> Result<GpuTensor, Box<dyn Error>> {
+    let cuda_kernels = get_kernels();
     let q = matmul_gpu(
         x,
         w_q,
         seq_len as i32,
         dim as i32,
-        dim as i32,
-        &cuda_kernels
+        dim as i32
     )?;
 
     let k = matmul_gpu(
@@ -142,8 +141,7 @@ pub fn attention_gpu(
         w_k,
         seq_len as i32,
         dim as i32,
-        dim as i32,
-        &cuda_kernels
+        dim as i32
     )?;
 
     let v = matmul_gpu(
@@ -151,8 +149,7 @@ pub fn attention_gpu(
         w_v,
         seq_len as i32,
         dim as i32,
-        dim as i32,
-        &cuda_kernels
+        dim as i32
     )?;
 
 
@@ -161,23 +158,21 @@ pub fn attention_gpu(
         &k,
         seq_len as i32,
         seq_len as i32,
-        dim as i32,
-        &cuda_kernels
+        dim as i32
     )?;
 
     let scale_factor = 1.0 / (dim as f32).sqrt();
     let mut scores = scores;
-    scale_gpu(&mut scores, scale_factor, &cuda_kernels)?;
+    scale_gpu(&mut scores, scale_factor)?;
 
-    softmax_cudnn_gpu_2d(&mut scores, &cuda_kernels)?;
+    softmax_cudnn_gpu_2d(&mut scores)?;
 
     let output = matmul_gpu(
         &scores,
         &v,
         seq_len as i32,
         dim as i32,
-        seq_len as i32,
-        &cuda_kernels
+        seq_len as i32
     )?;
 
     Ok(output)
@@ -193,10 +188,10 @@ pub fn attention_multihead_gpu (
     w_o: &GpuTensor,
     seq_len: usize,
     dim: usize,
-    num_heads: usize,
-    cuda_kernels: &CudaKernels
+    num_heads: usize
 ) -> Result<GpuTensor, Box<dyn Error>> {
 
+    let cuda_kernels = get_kernels();
     let head_dim = dim / num_heads;
 
     let q = matmul_gpu(
@@ -204,8 +199,7 @@ pub fn attention_multihead_gpu (
         w_q,
         seq_len as i32,
         dim as i32,
-        dim as i32,
-        &cuda_kernels
+        dim as i32
     )?;
 
     let k = matmul_gpu(
@@ -213,8 +207,7 @@ pub fn attention_multihead_gpu (
         w_k,
         seq_len as i32,
         dim as i32,
-        dim as i32,
-        &cuda_kernels
+        dim as i32
     )?;
 
     let v = matmul_gpu(
@@ -222,29 +215,27 @@ pub fn attention_multihead_gpu (
         w_v,
         seq_len as i32,
         dim as i32,
-        dim as i32,
-        &cuda_kernels
+        dim as i32
     )?;
 
     let mut head_outputs = GpuTensor::alloc_zeros(x.stream.clone(), seq_len * dim, vec![seq_len, dim])?;
 
     for h in 0..num_heads {
-        let q_head = extract_head(&q, seq_len, dim, head_dim, h, &cuda_kernels)?;
-        let k_head = extract_head(&k, seq_len, dim, head_dim, h, &cuda_kernels)?;
-        let v_head = extract_head(&v, seq_len, dim, head_dim, h, &cuda_kernels)?;
+        let q_head = extract_head(&q, seq_len, dim, head_dim, h)?;
+        let k_head = extract_head(&k, seq_len, dim, head_dim, h)?;
+        let v_head = extract_head(&v, seq_len, dim, head_dim, h)?;
 
         let mut scores = matmul_gpu_bt(
             &q_head,
             &k_head,
             seq_len as i32,
             seq_len as i32,
-            head_dim as i32,
-            &cuda_kernels
+            head_dim as i32
         )?;
 
         let scale_factor = 1.0 / (head_dim as f32).sqrt();
-        scale_gpu(&mut scores, scale_factor, &cuda_kernels)?;
-        softmax_cudnn_gpu_2d(&mut scores, &cuda_kernels)?;
+        scale_gpu(&mut scores, scale_factor)?;
+        softmax_cudnn_gpu_2d(&mut scores)?;
 
 
         let head_out = matmul_gpu(
@@ -252,11 +243,10 @@ pub fn attention_multihead_gpu (
             &v_head,
             seq_len as i32,
             head_dim as i32,
-            seq_len as i32,
-            &cuda_kernels
+            seq_len as i32
         )?;
 
-        combine_heads(&mut head_outputs, &head_out, seq_len, dim, head_dim, h, &cuda_kernels)?;
+        combine_heads(&mut head_outputs, &head_out, seq_len, dim, head_dim, h)?;
     }
 
     let output = matmul_gpu(
@@ -264,8 +254,7 @@ pub fn attention_multihead_gpu (
         &w_o,
         seq_len as i32,
         dim as i32,
-        dim as i32,
-        &cuda_kernels
+        dim as i32
     )?;
 
     Ok(output)

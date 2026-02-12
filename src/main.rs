@@ -6,6 +6,7 @@ mod gpu_tensor;
 mod head_ops;
 mod cuda_kernels;
 mod residual;
+mod gelu;
 
 use std::error::Error;
 use cudarc::driver::CudaContext;
@@ -58,24 +59,24 @@ fn main() -> Result<(), Box<dyn Error>> {
 
     let a = GpuTensor::from_cpu(stream.clone(), &vec![1.0f32; 6], vec![2, 3])?;
     let b = GpuTensor::from_cpu(stream.clone(), &vec![1.0f32; 6], vec![3, 2])?;
-    let c = matmul_gpu(&a, &b, 2, 2, 3, &cuda_kernels)?;
+    let c = matmul_gpu(&a, &b, 2, 2, 3)?;
     let result = c.to_cpu()?;
     println!("Result of matmul_gpu {:?}", result);
 
 
 
     let mut x = GpuTensor::from_cpu(stream.clone(), &vec![2.0f32, 4.0, 6.0, 8.0], vec![4])?;
-    scale_gpu(&mut x, 0.5, &cuda_kernels)?;
+    scale_gpu(&mut x, 0.5)?;
     let result = x.to_cpu()?;
     println!("Result of scale_gpu {:?}", result);
 
     let mut t = GpuTensor::from_cpu(stream.clone(), &vec![1.0, 2.0, 3.0, 4.0], vec![4])?;
-    softmax_cudnn_gpu(&mut t, &cuda_kernels)?;
+    softmax_cudnn_gpu(&mut t)?;
     let result = t.to_cpu()?;
     println!("Result of softmax_cudnn_gpu {:?}", result);
 
     let mut scores = GpuTensor::from_cpu(stream.clone(), &vec![1.0, 2.0, 3.0, 4.0], vec![2, 2])?;
-    softmax_cudnn_gpu_2d(&mut scores, &cuda_kernels)?;
+    softmax_cudnn_gpu_2d(&mut scores)?;
     let result = scores.to_cpu()?;
     println!("Result of softmax_cudnn_gpu_2d {:?}", result);
 
@@ -85,7 +86,7 @@ fn main() -> Result<(), Box<dyn Error>> {
     // K: 2x3 matrix (will be transposed to 3x2)
     let k = GpuTensor::from_cpu(stream3.clone(), &vec![1.0f32, 2.0, 3.0, 4.0, 5.0, 6.0], vec![2, 3])?;
 
-    let scores = matmul_gpu_bt(&q, &k, 2, 2, 3, &cuda_kernels)?;
+    let scores = matmul_gpu_bt(&q, &k, 2, 2, 3)?;
     println!("matmul_gpu_bt: {:?}", scores.to_cpu()?);
 
     let seq_len = 2;
@@ -94,19 +95,19 @@ fn main() -> Result<(), Box<dyn Error>> {
     let w_k = GpuTensor::from_cpu(stream3.clone(), &vec![1.0f32; dim * dim], vec![dim, dim])?;
     let w_v = GpuTensor::from_cpu(stream3.clone(), &vec![1.0f32; dim * dim], vec![dim, dim])?;
 
-    let output = attention_gpu(&x, &w_q, &w_k, &w_v, seq_len, dim, &cuda_kernels)?;
+    let output = attention_gpu(&x, &w_q, &w_k, &w_v, seq_len, dim)?;
     println!("attention_gpu: {:?}", output.to_cpu()?);
 
     let data = [1.0f32, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0];
     let t = GpuTensor::from_cpu(stream3.clone(), &data, vec![2, 4])?;
-    let head0 = extract_head(&t, 2, 4, 2, 0, &cuda_kernels)?;
+    let head0 = extract_head(&t, 2, 4, 2, 0)?;
     println!("head0: {:?}", head0.to_cpu());
-    let head1 = extract_head(&t, 2, 4, 2, 1, &cuda_kernels)?;
+    let head1 = extract_head(&t, 2, 4, 2, 1)?;
     println!("head1: {:?}", head1.to_cpu());
 
     let mut combined = GpuTensor::from_cpu(stream3.clone(), &vec![0.0f32; 8], vec![2, 4])?;
-    combine_heads(&mut combined, &head0, 2, 4, 2, 0, &cuda_kernels)?;
-    combine_heads(&mut combined, &head1, 2, 4, 2, 1, &cuda_kernels)?;
+    combine_heads(&mut combined, &head0, 2, 4, 2, 0)?;
+    combine_heads(&mut combined, &head1, 2, 4, 2, 1)?;
 
     println!("combined: {:?}", combined.to_cpu());
 
@@ -118,14 +119,13 @@ fn main() -> Result<(), Box<dyn Error>> {
     let w_v = GpuTensor::from_cpu(stream3.clone(), &vec![1.0f32; dim * dim], vec![dim, dim])?;
     let w_o = GpuTensor::from_cpu(stream3.clone(), &vec![1.0f32; dim * dim], vec![dim, dim])?;
 
-    let output = attention_multihead_gpu(&x, &w_q, &w_k, &w_v, &w_o, seq_len, dim, num_heads, &cuda_kernels)?;
+    let output = attention_multihead_gpu(&x, &w_q, &w_k, &w_v, &w_o, seq_len, dim, num_heads)?;
     println!("Result of multi-head attention {:?}", output.to_cpu()?);
 
     let mut a = GpuTensor::from_cpu(stream3.clone(), &vec![1.0f32, 2.0, 3.0, 4.0], vec![4])?;
     let b = GpuTensor::from_cpu(stream3.clone(), &vec![10.0f32, 20.0, 30.0, 40.0], vec![4])?;
-    residual_add(&mut a, &b, &cuda_kernels)?;
+    residual_add(&mut a, &b)?;
     println!("Result of multi-head residual attention {:?}", a.to_cpu()?);
-
 
     Ok(())
 }

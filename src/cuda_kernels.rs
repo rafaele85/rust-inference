@@ -1,5 +1,5 @@
 use std::error::Error;
-use std::sync::Arc;
+use std::sync::{Arc, OnceLock};
 use cudarc::cublas::CudaBlas;
 use cudarc::cudnn::result::create_handle;
 use cudarc::cudnn::sys::cudnnHandle_t;
@@ -11,6 +11,7 @@ pub struct CudaKernels {
     pub extract_head: CudaFunction,
     pub combine_heads: CudaFunction,
     pub residual_add: CudaFunction,
+    pub gelu: CudaFunction,
     pub blas: CudaBlas,
     pub cudnn_handle: cudnnHandle_t,
 }
@@ -20,13 +21,27 @@ impl CudaKernels {
         let scale_module = ctx.load_module(Ptx::from_file("kernels/scale.ptx"))?;
         let head_ops_module = ctx.load_module(Ptx::from_file("kernels/head_ops.ptx"))?;
         let residual_module = ctx.load_module(Ptx::from_file("kernels/residual.ptx"))?;
+        let gelu_module = ctx.load_module(Ptx::from_file("kernels/gelu.ptx"))?;
         Ok(Self {
             scale: scale_module.load_function("scale")?,
             extract_head: head_ops_module.load_function("extract_head")?,
             combine_heads: head_ops_module.load_function("combine_heads")?,
             residual_add: residual_module.load_function("residual_add")?,
+            gelu: gelu_module.load_function("gelu")?,
             blas: CudaBlas::new(ctx.default_stream())?,
             cudnn_handle: create_handle()?
         })
     }
+}
+
+unsafe impl Send for CudaKernels {}
+unsafe impl Sync for CudaKernels {}
+
+static CUDA_KERNELS: OnceLock<CudaKernels> = OnceLock::new();
+
+pub fn get_kernels() -> &'static CudaKernels {
+    CUDA_KERNELS.get_or_init(|| {
+        let ctx = CudaContext::new(0).expect("Failed to create cuda context");
+        CudaKernels::new(&ctx).expect("Failed to create cuda kernels")
+    })
 }

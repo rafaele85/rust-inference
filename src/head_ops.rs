@@ -1,6 +1,6 @@
 use std::error::Error;
 use cudarc::driver::{LaunchConfig, PushKernelArg};
-use crate::cuda_kernels::CudaKernels;
+use crate::cuda_kernels::{get_kernels, CudaKernels};
 use crate::gpu_tensor::GpuTensor;
 
 pub fn extract_head(
@@ -8,9 +8,9 @@ pub fn extract_head(
     seq_len: usize,
     dim: usize,
     head_dim: usize,
-    head_idx: usize,
-    cuda_kernels: &CudaKernels
+    head_idx: usize
 ) -> Result<GpuTensor, Box<dyn Error>> {
+    let cuda_kernels = get_kernels();
     let kernel = &cuda_kernels.extract_head;
 
     let out_size = seq_len * head_dim;
@@ -52,9 +52,9 @@ pub fn combine_heads(
     seq_len: usize,
     dim: usize,
     head_dim: usize,
-    head_idx: usize,
-    cuda_kernels: &CudaKernels
+    head_idx: usize
 ) -> Result<(), Box<dyn Error>> {
+    let cuda_kernels = get_kernels();
     let kernel = &cuda_kernels.combine_heads;
 
     let n = (seq_len * head_dim) as f32;

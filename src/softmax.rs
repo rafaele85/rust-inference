@@ -6,7 +6,7 @@ use cudarc::cudnn::sys::cudnnSoftmaxAlgorithm_t::CUDNN_SOFTMAX_ACCURATE;
 use cudarc::cudnn::sys::cudnnSoftmaxMode_t::CUDNN_SOFTMAX_MODE_CHANNEL;
 use cudarc::cudnn::sys::cudnnTensorFormat_t::CUDNN_TENSOR_NCHW;
 use cudarc::driver::{DevicePtr, DevicePtrMut};
-use crate::cuda_kernels::CudaKernels;
+use crate::cuda_kernels::{get_kernels, CudaKernels};
 use crate::gpu_tensor::GpuTensor;
 
 pub fn softmax_cpu(x: &mut Vec<f32>) {
@@ -24,7 +24,8 @@ pub fn softmax_cpu(x: &mut Vec<f32>) {
 }
 
 
-pub fn softmax_cudnn_gpu(x: &mut GpuTensor, cuda_kernels: &CudaKernels) -> Result<(), Box<dyn Error>> {
+pub fn softmax_cudnn_gpu(x: &mut GpuTensor) -> Result<(), Box<dyn Error>> {
+    let cuda_kernels = get_kernels();
     let desc = create_tensor_descriptor()?;
     let n = x.len() as i32;
     unsafe {
@@ -61,7 +62,8 @@ pub fn softmax_cudnn_gpu(x: &mut GpuTensor, cuda_kernels: &CudaKernels) -> Resul
 }
 
 
-pub fn softmax_cudnn_gpu_2d(x: &mut GpuTensor, cuda_kernels: &CudaKernels) -> Result<(), Box<dyn Error>> {
+pub fn softmax_cudnn_gpu_2d(x: &mut GpuTensor) -> Result<(), Box<dyn Error>> {
+    let cuda_kernels = get_kernels();
     let rows = x.shape[0] as i32;
     let cols = x.shape[1] as i32;
 

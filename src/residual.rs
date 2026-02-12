@@ -1,13 +1,13 @@
 use std::error::Error;
 use cudarc::driver::{LaunchConfig, PushKernelArg};
-use crate::cuda_kernels::CudaKernels;
+use crate::cuda_kernels::{get_kernels, CudaKernels};
 use crate::gpu_tensor::GpuTensor;
 
 pub fn residual_add(
     a: &mut GpuTensor,
-    b: &GpuTensor,
-    kernels: &CudaKernels,
+    b: &GpuTensor
 ) -> Result<(), Box<dyn Error>> {
+    let cuda_kernels = get_kernels();
     let n = a.len() as i32;
     const BLOCK_SIZE: usize = 256;
 
@@ -19,7 +19,7 @@ pub fn residual_add(
         shared_mem_bytes: 0
     };
 
-    let mut builder = a.stream.launch_builder(&kernels.residual_add);
+    let mut builder = a.stream.launch_builder(&cuda_kernels.residual_add);
     builder.arg(&mut a.data);
     builder.arg(&b.data);
     builder.arg(&n);

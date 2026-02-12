@@ -1,9 +1,10 @@
 use std::error::Error;
 use cudarc::driver::{LaunchConfig, PushKernelArg};
-use crate::cuda_kernels::CudaKernels;
+use crate::cuda_kernels::{get_kernels, CudaKernels};
 use crate::gpu_tensor::GpuTensor;
 
-pub fn scale_gpu(x: &mut GpuTensor, factor: f32, cuda_kernels: &CudaKernels) -> Result<(), Box<dyn Error>> {
+pub fn scale_gpu(x: &mut GpuTensor, factor: f32) -> Result<(), Box<dyn Error>> {
+    let cuda_kernels = get_kernels();
     let kernel = &cuda_kernels.scale;
 
     let n = x.len() as i32;
