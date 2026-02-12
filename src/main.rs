@@ -7,11 +7,13 @@ mod head_ops;
 mod cuda_kernels;
 mod residual;
 mod gelu;
+mod ffn;
 
 use std::error::Error;
 use cudarc::driver::CudaContext;
 use crate::attention::{attention_gpu, attention_multihead, attention_multihead_gpu};
 use crate::cuda_kernels::CudaKernels;
+use crate::ffn::ffn;
 use crate::gelu::gelu;
 use crate::gpu_tensor::GpuTensor;
 use crate::head_ops::{combine_heads, extract_head};
@@ -131,6 +133,16 @@ fn main() -> Result<(), Box<dyn Error>> {
     let mut x = GpuTensor::from_cpu(stream3.clone(), &vec![-2.0f32, -1.0, 0.0, 1.0, 2.0], vec![5])?;
     gelu(&mut x)?;
     println!("Result of gelu {:?}", x.to_cpu()?);
+
+    let hidden_dim = 8;
+
+    let x = GpuTensor::from_cpu(stream3.clone(), &vec![1.0f32; seq_len * dim], vec![seq_len, dim])?;
+    let w1 = GpuTensor::from_cpu(stream3.clone(), &vec![0.1f32; dim * hidden_dim], vec![dim, hidden_dim])?;
+    let w2 = GpuTensor::from_cpu(stream3.clone(), &vec![0.1f32; hidden_dim * dim], vec![hidden_dim, dim])?;
+
+    let output = ffn(&x, &w1, &w2, seq_len, dim, hidden_dim)?;
+    println!("ffn: {:?}", output.to_cpu()?);
+
 
     Ok(())
 }
