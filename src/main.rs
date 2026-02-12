@@ -12,6 +12,7 @@ use std::error::Error;
 use cudarc::driver::CudaContext;
 use crate::attention::{attention_gpu, attention_multihead, attention_multihead_gpu};
 use crate::cuda_kernels::CudaKernels;
+use crate::gelu::gelu;
 use crate::gpu_tensor::GpuTensor;
 use crate::head_ops::{combine_heads, extract_head};
 use crate::matmul::{matmul, matmul_gpu, matmul_gpu_bt};
@@ -126,6 +127,10 @@ fn main() -> Result<(), Box<dyn Error>> {
     let b = GpuTensor::from_cpu(stream3.clone(), &vec![10.0f32, 20.0, 30.0, 40.0], vec![4])?;
     residual_add(&mut a, &b)?;
     println!("Result of multi-head residual attention {:?}", a.to_cpu()?);
+
+    let mut x = GpuTensor::from_cpu(stream3.clone(), &vec![-2.0f32, -1.0, 0.0, 1.0, 2.0], vec![5])?;
+    gelu(&mut x)?;
+    println!("Result of gelu {:?}", x.to_cpu()?);
 
     Ok(())
 }
