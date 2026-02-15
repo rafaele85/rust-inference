@@ -14,6 +14,7 @@ mod output_projections;
 mod embeddings;
 mod rope;
 mod rms_norm;
+mod silu;
 
 use std::error::Error;
 use cudarc::driver::CudaContext;
@@ -31,6 +32,7 @@ use crate::residual::residual_add;
 use crate::rms_norm::rms_norm;
 use crate::rope::rope;
 use crate::scale::scale_gpu;
+use crate::silu::silu;
 use crate::softmax::{softmax_cudnn_gpu, softmax_cudnn_gpu_2d};
 use crate::transformer_block::transformer_block;
 
@@ -240,6 +242,11 @@ fn main() -> Result<(), Box<dyn Error>> {
     let out = rms_norm(&x, &gamma)?;
 
     println!("Result of rms_norm {:?}", out.to_cpu()?);
+
+    let mut x = GpuTensor::from_cpu(stream3.clone(), &vec![-2.0f32, -1.0, 0.0, 1.0, 2.0], vec![5])?;
+    silu(&mut x)?;
+    println!("Result of silu {:?}", x.to_cpu()?);
+
 
     Ok(())
 }
