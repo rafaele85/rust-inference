@@ -22,7 +22,7 @@ use crate::gpu_tensor::GpuTensor;
 use crate::head_ops::{combine_heads, extract_head};
 use crate::layer_norm::layer_norm;
 use crate::matmul::{matmul, matmul_gpu, matmul_gpu_bt};
-use crate::output_projections::output_projections;
+use crate::output_projections::{arg_max, get_last_logits, output_projections};
 use crate::residual::residual_add;
 use crate::scale::scale_gpu;
 use crate::softmax::{softmax_cudnn_gpu, softmax_cudnn_gpu_2d};
@@ -196,8 +196,12 @@ fn main() -> Result<(), Box<dyn Error>> {
 
     let logits = output_projections(&x, &gamma, &beta, &w_vocab, seq_len, dim, vocab_size)?;
 
+    let last_logits = get_last_logits(&logits)?;
+
+    let next_token = arg_max(last_logits.as_slice());
+
     println!("logits shape: {:?}", logits.shape);
-    println!("logits: {:?}", logits.to_cpu()?);
+    println!("next token: {}", next_token);
 
 
     Ok(())

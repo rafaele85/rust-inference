@@ -18,3 +18,29 @@ pub fn output_projections(
 
     Ok(logits)
 }
+
+
+pub fn get_last_logits(logits: &GpuTensor) -> Result<Vec<f32>, Box<dyn Error>> {
+    let seq_len = logits.shape[0];
+    let vocab_size = logits.shape[1];
+
+    let all_logits = logits.to_cpu()?;
+    let start = (seq_len - 1) * vocab_size;
+    let last_logits = all_logits[start..start + vocab_size].to_vec();
+
+    Ok(last_logits)
+}
+
+pub fn arg_max(arr: &[f32]) -> usize {
+    let mut index: usize = 0;
+    let mut max_value = arr[index];
+
+    for (i, &val) in arr.iter().enumerate() {
+        if val > max_value {
+            max_value = val;
+            index = i;
+        }
+    }
+
+    index
+}
