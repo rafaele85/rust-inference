@@ -143,6 +143,9 @@ fn main() -> Result<(), Box<dyn Error>> {
     let output = ffn(&x, &w1, &w2, seq_len, dim, hidden_dim)?;
     println!("ffn: {:?}", output.to_cpu()?);
 
+    let mut test = GpuTensor::from_cpu(stream3.clone(), &vec![0.4f32], vec![1])?;
+    gelu(&mut test)?;
+    println!("gelu(0.4): {:?}", test.to_cpu()?);
 
     Ok(())
 }
