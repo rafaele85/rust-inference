@@ -15,13 +15,14 @@ mod embeddings;
 mod rope;
 mod rms_norm;
 mod silu;
+mod mul;
 
 use std::error::Error;
 use cudarc::driver::CudaContext;
 use crate::attention::{attention_gpu, attention_multihead, attention_multihead_gpu};
 use crate::cuda_kernels::CudaKernels;
 use crate::embeddings::embeddings;
-use crate::ffn::ffn;
+use crate::ffn::{ffn, ffn_swiglu};
 use crate::gelu::gelu;
 use crate::gpu_tensor::GpuTensor;
 use crate::head_ops::{combine_heads, extract_head};
@@ -247,6 +248,20 @@ fn main() -> Result<(), Box<dyn Error>> {
     silu(&mut x)?;
     println!("Result of silu {:?}", x.to_cpu()?);
 
+
+    let x = GpuTensor::from_cpu(stream3.clone(), &vec![
+        1.0f32, 2.0, 3.0, 4.0,
+        0.5, 1.0, 1.5, 2.0,
+    ], vec![seq_len, dim])?;
+
+    let w_gate = GpuTensor::from_cpu(stream3.clone(), &vec![0.1f32; dim*hidden_dim], vec![dim, hidden_dim])?;
+    let w_up = GpuTensor::from_cpu(stream3.clone(), &vec![0.2f32; dim*hidden_dim], vec![dim, hidden_dim])?;
+    let w_down = GpuTensor::from_cpu(stream3.clone(), &vec![0.1f32; dim*hidden_dim], vec![dim, hidden_dim])?;
+
+    let output = ffn_swiglu(&x, &w_gate, &w_up, &w_down, seq_len, dim, hidden_dim)?;
+
+    println!("output shape: {:?}", output.shape);
+    println!("ffn_swiglu {:?}", output.to_cpu()?);
 
     Ok(())
 }

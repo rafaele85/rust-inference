@@ -17,6 +17,7 @@ pub struct CudaKernels {
     pub rope: CudaFunction,
     pub rms_norm: CudaFunction,
     pub silu: CudaFunction,
+    pub mul: CudaFunction,
     pub blas: CudaBlas,
     pub cudnn_handle: cudnnHandle_t,
 }
@@ -32,6 +33,7 @@ impl CudaKernels {
         let rope_module = ctx.load_module(Ptx::from_file("kernels/rope.ptx"))?;
         let rms_module = ctx.load_module(Ptx::from_file("kernels/rms.ptx"))?;
         let silu_module = ctx.load_module(Ptx::from_file("kernels/silu.ptx"))?;
+        let mul_module = ctx.load_module(Ptx::from_file("kernels/mul.ptx"))?;
         Ok(Self {
             scale: scale_module.load_function("scale")?,
             extract_head: head_ops_module.load_function("extract_head")?,
@@ -43,6 +45,7 @@ impl CudaKernels {
             rope: rope_module.load_function("rope")?,
             rms_norm: rms_module.load_function("rms")?,
             silu: silu_module.load_function("silu")?,
+            mul: mul_module.load_function("mul")?,
             blas: CudaBlas::new(ctx.default_stream())?,
             cudnn_handle: create_handle()?
         })
