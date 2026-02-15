@@ -13,6 +13,7 @@ mod transformer_block;
 mod output_projections;
 mod embeddings;
 mod rope;
+mod rms_norm;
 
 use std::error::Error;
 use cudarc::driver::CudaContext;
@@ -27,6 +28,7 @@ use crate::layer_norm::layer_norm;
 use crate::matmul::{matmul, matmul_gpu, matmul_gpu_bt};
 use crate::output_projections::{arg_max, get_last_logits, output_projections};
 use crate::residual::residual_add;
+use crate::rms_norm::rms_norm;
 use crate::rope::rope;
 use crate::scale::scale_gpu;
 use crate::softmax::{softmax_cudnn_gpu, softmax_cudnn_gpu_2d};
@@ -233,6 +235,11 @@ fn main() -> Result<(), Box<dyn Error>> {
     let output = attention_multihead_gpu(&x, &w_q, &w_k, &w_v, &w_o, seq_len, dim, num_heads)?;
     println!("Result of multi-head attention {:?}", output.to_cpu()?);
 
+    let x = GpuTensor::from_cpu(stream.clone(), &vec![1.0f32, 2.0, 3.0, 4.0,   2.0, 4.0, 6.0, 8.0], vec![2, 4])?;
+    let gamma = GpuTensor::from_cpu(stream.clone(), &vec![1.0f32, 1.0, 1.0, 1.0], vec![4])?;
+    let out = rms_norm(&x, &gamma)?;
+
+    println!("Result of rms_norm {:?}", out.to_cpu()?);
 
     Ok(())
 }

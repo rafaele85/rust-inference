@@ -15,6 +15,7 @@ pub struct CudaKernels {
     pub layer_norm: CudaFunction,
     pub embeddings: CudaFunction,
     pub rope: CudaFunction,
+    pub rms_norm: CudaFunction,
     pub blas: CudaBlas,
     pub cudnn_handle: cudnnHandle_t,
 }
@@ -28,6 +29,7 @@ impl CudaKernels {
         let layer_norm_module = ctx.load_module(Ptx::from_file("kernels/layer_norm.ptx"))?;
         let embedding_module = ctx.load_module(Ptx::from_file("kernels/embeddings.ptx"))?;
         let rope_module = ctx.load_module(Ptx::from_file("kernels/rope.ptx"))?;
+        let rms_module = ctx.load_module(Ptx::from_file("kernels/rms.ptx"))?;
         Ok(Self {
             scale: scale_module.load_function("scale")?,
             extract_head: head_ops_module.load_function("extract_head")?,
@@ -37,6 +39,7 @@ impl CudaKernels {
             layer_norm: layer_norm_module.load_function("layer_norm")?,
             embeddings: embedding_module.load_function("embeddings")?,
             rope: rope_module.load_function("rope")?,
+            rms_norm: rms_module.load_function("rms")?,
             blas: CudaBlas::new(ctx.default_stream())?,
             cudnn_handle: create_handle()?
         })
