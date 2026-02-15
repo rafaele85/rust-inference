@@ -11,11 +11,13 @@ mod ffn;
 mod layer_norm;
 mod transformer_block;
 mod output_projections;
+mod embeddings;
 
 use std::error::Error;
 use cudarc::driver::CudaContext;
 use crate::attention::{attention_gpu, attention_multihead, attention_multihead_gpu};
 use crate::cuda_kernels::CudaKernels;
+use crate::embeddings::embeddings;
 use crate::ffn::ffn;
 use crate::gelu::gelu;
 use crate::gpu_tensor::GpuTensor;
@@ -202,6 +204,24 @@ fn main() -> Result<(), Box<dyn Error>> {
 
     println!("logits shape: {:?}", logits.shape);
     println!("next token: {}", next_token);
+
+    let vocab_size = 4;
+    let dim2 = 3;
+
+    let embed_table = GpuTensor::from_cpu(stream3.clone(), &vec![
+        0.1, 0.2, 0.3,
+        0.4, 0.5, 0.6,
+        0.7, 0.8, 0.9,
+        1.0, 1.1, 1.2
+    ], vec![vocab_size, dim2])?;
+
+    let token_ids = vec![2, 0, 3];
+
+    let embedded = embeddings(&token_ids, &embed_table)?;
+    println!("token_ids: {:?}", token_ids);
+    println!("embed_table: {:?}", embed_table.to_cpu()?);
+    println!("embeddings shape: {:?}", embedded.shape);
+    println!("embeddings: {:?}", embedded.to_cpu());
 
 
     Ok(())
