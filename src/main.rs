@@ -12,6 +12,7 @@ mod layer_norm;
 mod transformer_block;
 mod output_projections;
 mod embeddings;
+mod rope;
 
 use std::error::Error;
 use cudarc::driver::CudaContext;
@@ -26,6 +27,7 @@ use crate::layer_norm::layer_norm;
 use crate::matmul::{matmul, matmul_gpu, matmul_gpu_bt};
 use crate::output_projections::{arg_max, get_last_logits, output_projections};
 use crate::residual::residual_add;
+use crate::rope::rope;
 use crate::scale::scale_gpu;
 use crate::softmax::{softmax_cudnn_gpu, softmax_cudnn_gpu_2d};
 use crate::transformer_block::transformer_block;
@@ -124,14 +126,6 @@ fn main() -> Result<(), Box<dyn Error>> {
 
     let seq_len = 2;
 
-    let x = GpuTensor::from_cpu(stream3.clone(), &vec![1.0f32; seq_len * dim], vec![seq_len, dim])?;
-    let w_q = GpuTensor::from_cpu(stream3.clone(), &vec![1.0f32; dim * dim], vec![dim, dim])?;
-    let w_k = GpuTensor::from_cpu(stream3.clone(), &vec![1.0f32; dim * dim], vec![dim, dim])?;
-    let w_v = GpuTensor::from_cpu(stream3.clone(), &vec![1.0f32; dim * dim], vec![dim, dim])?;
-    let w_o = GpuTensor::from_cpu(stream3.clone(), &vec![1.0f32; dim * dim], vec![dim, dim])?;
-
-    let output = attention_multihead_gpu(&x, &w_q, &w_k, &w_v, &w_o, seq_len, dim, num_heads)?;
-    println!("Result of multi-head attention {:?}", output.to_cpu()?);
 
     let mut a = GpuTensor::from_cpu(stream3.clone(), &vec![1.0f32, 2.0, 3.0, 4.0], vec![4])?;
     let b = GpuTensor::from_cpu(stream3.clone(), &vec![10.0f32, 20.0, 30.0, 40.0], vec![4])?;
@@ -222,6 +216,22 @@ fn main() -> Result<(), Box<dyn Error>> {
     println!("embed_table: {:?}", embed_table.to_cpu()?);
     println!("embeddings shape: {:?}", embedded.shape);
     println!("embeddings: {:?}", embedded.to_cpu());
+
+    let mut x = GpuTensor::from_cpu(stream.clone(), &vec![1.0f32, 2.0, 3.0, 4.0, 1.0, 2.0, 3.0, 4.0], vec![seq_len, dim])?;
+    rope(&mut x)?;
+
+    println!("rope: {:?}", x.to_cpu()?);
+
+
+    let x = GpuTensor::from_cpu(stream3.clone(), &vec![1.0f32, 2.0, 3.0, 4.0, 2.0, 3.0, 4.0, 5.0], vec![seq_len, dim])?;
+    let w_q = GpuTensor::from_cpu(stream.clone(), &vec![0.1f32, 0.2, 0.3, 0.4, 0.2, 0.1, 0.4, 0.3, 0.3, 0.4, 0.1, 0.2, 0.4, 0.3, 0.2, 0.1], vec![dim, dim])?;
+    let w_k = GpuTensor::from_cpu(stream.clone(), &vec![0.2f32, 0.1, 0.4, 0.3, 0.1, 0.2, 0.3, 0.4, 0.4, 0.3, 0.2, 0.1, 0.3, 0.4, 0.1, 0.2], vec![dim, dim])?;
+    let w_v = GpuTensor::from_cpu(stream.clone(), &vec![0.3f32, 0.4, 0.1, 0.2, 0.4, 0.3, 0.2, 0.1, 0.1, 0.2, 0.3, 0.4, 0.2, 0.1, 0.4, 0.3], vec![dim, dim])?;
+    let w_o = GpuTensor::from_cpu(stream.clone(), &vec![0.1f32, 0.3, 0.2, 0.4, 0.3, 0.1, 0.4, 0.2, 0.2, 0.4, 0.1, 0.3, 0.4, 0.2, 0.3, 0.1], vec![dim, dim])?;
+
+
+    let output = attention_multihead_gpu(&x, &w_q, &w_k, &w_v, &w_o, seq_len, dim, num_heads)?;
+    println!("Result of multi-head attention {:?}", output.to_cpu()?);
 
 
     Ok(())

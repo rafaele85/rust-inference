@@ -3,6 +3,7 @@ use crate::cuda_kernels::{get_kernels};
 use crate::gpu_tensor::GpuTensor;
 use crate::head_ops::{combine_heads, extract_head};
 use crate::matmul::{matmul, matmul_gpu, matmul_gpu_bt};
+use crate::rope::rope;
 use crate::scale::{scale_gpu};
 use crate::softmax::{softmax_cpu, softmax_cudnn_gpu_2d};
 
@@ -202,7 +203,7 @@ pub fn attention_multihead_gpu (
         dim as i32
     )?;
 
-    let k = matmul_gpu(
+    let mut k = matmul_gpu(
         x,
         w_k,
         seq_len as i32,
@@ -210,13 +211,16 @@ pub fn attention_multihead_gpu (
         dim as i32
     )?;
 
-    let v = matmul_gpu(
+    let mut v = matmul_gpu(
         x,
         w_v,
         seq_len as i32,
         dim as i32,
         dim as i32
     )?;
+
+    rope(&mut k)?;
+    rope(&mut v)?;
 
     let mut head_outputs = GpuTensor::alloc_zeros(x.stream.clone(), seq_len * dim, vec![seq_len, dim])?;
 
