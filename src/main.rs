@@ -16,6 +16,7 @@ mod rope;
 mod rms_norm;
 mod silu;
 mod mul;
+mod gguf;
 
 use std::error::Error;
 use cudarc::driver::CudaContext;
@@ -24,6 +25,7 @@ use crate::cuda_kernels::CudaKernels;
 use crate::embeddings::embeddings;
 use crate::ffn::{ffn, ffn_swiglu};
 use crate::gelu::gelu;
+use crate::gguf::gguf::read_gguf_header;
 use crate::gpu_tensor::GpuTensor;
 use crate::head_ops::{combine_heads, extract_head};
 use crate::layer_norm::layer_norm;
@@ -267,7 +269,7 @@ fn main() -> Result<(), Box<dyn Error>> {
 
     println!("transformer_block_llama: {:?}", output.to_cpu()?);
 
-
+    read_gguf_header("tinyllama-1.1b-chat-v1.0.Q4_0.gguf")?;
 
     Ok(())
 }

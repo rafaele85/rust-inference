@@ -5,3 +5,4 @@ edition = "2024"
 
 [dependencies]
 cudarc = { version = "0.17", features = ["cuda-12090", "cublas", "cudnn"] }
+memmap2 = "0.9"
