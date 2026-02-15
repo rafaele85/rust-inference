@@ -8,6 +8,7 @@ mod cuda_kernels;
 mod residual;
 mod gelu;
 mod ffn;
+mod layer_norm;
 
 use std::error::Error;
 use cudarc::driver::CudaContext;
@@ -17,6 +18,7 @@ use crate::ffn::ffn;
 use crate::gelu::gelu;
 use crate::gpu_tensor::GpuTensor;
 use crate::head_ops::{combine_heads, extract_head};
+use crate::layer_norm::layer_norm;
 use crate::matmul::{matmul, matmul_gpu, matmul_gpu_bt};
 use crate::residual::residual_add;
 use crate::scale::scale_gpu;
@@ -146,6 +148,13 @@ fn main() -> Result<(), Box<dyn Error>> {
     let mut test = GpuTensor::from_cpu(stream3.clone(), &vec![0.4f32], vec![1])?;
     gelu(&mut test)?;
     println!("gelu(0.4): {:?}", test.to_cpu()?);
+
+    let x = GpuTensor::from_cpu(stream3.clone(), &vec![1.0f32, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0], vec![seq_len, dim])?;
+    let gamma = GpuTensor::from_cpu(stream3.clone(), &vec![1.0f32; dim], vec![dim])?;
+    let beta = GpuTensor::from_cpu(stream3.clone(), &vec![0.0f32; dim], vec![dim])?;
+
+    let output = layer_norm(&x, &gamma, &beta, 1e-5)?;
+    println!("Layer norm {:?}", output.to_cpu());
 
     Ok(())
 }

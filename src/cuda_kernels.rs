@@ -12,6 +12,7 @@ pub struct CudaKernels {
     pub combine_heads: CudaFunction,
     pub residual_add: CudaFunction,
     pub gelu: CudaFunction,
+    pub layer_norm: CudaFunction,
     pub blas: CudaBlas,
     pub cudnn_handle: cudnnHandle_t,
 }
@@ -22,12 +23,14 @@ impl CudaKernels {
         let head_ops_module = ctx.load_module(Ptx::from_file("kernels/head_ops.ptx"))?;
         let residual_module = ctx.load_module(Ptx::from_file("kernels/residual.ptx"))?;
         let gelu_module = ctx.load_module(Ptx::from_file("kernels/gelu.ptx"))?;
+        let layer_norm_module = ctx.load_module(Ptx::from_file("kernels/layer_norm.ptx"))?;
         Ok(Self {
             scale: scale_module.load_function("scale")?,
             extract_head: head_ops_module.load_function("extract_head")?,
             combine_heads: head_ops_module.load_function("combine_heads")?,
             residual_add: residual_module.load_function("residual_add")?,
             gelu: gelu_module.load_function("gelu")?,
+            layer_norm: layer_norm_module.load_function("layer_norm")?,
             blas: CudaBlas::new(ctx.default_stream())?,
             cudnn_handle: create_handle()?
         })
