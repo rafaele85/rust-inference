@@ -10,6 +10,7 @@ mod gelu;
 mod ffn;
 mod layer_norm;
 mod transformer_block;
+mod output_projections;
 
 use std::error::Error;
 use cudarc::driver::CudaContext;
@@ -21,6 +22,7 @@ use crate::gpu_tensor::GpuTensor;
 use crate::head_ops::{combine_heads, extract_head};
 use crate::layer_norm::layer_norm;
 use crate::matmul::{matmul, matmul_gpu, matmul_gpu_bt};
+use crate::output_projections::output_projections;
 use crate::residual::residual_add;
 use crate::scale::scale_gpu;
 use crate::softmax::{softmax_cudnn_gpu, softmax_cudnn_gpu_2d};
@@ -180,6 +182,23 @@ fn main() -> Result<(), Box<dyn Error>> {
         seq_len, dim, num_heads, hidden_dim)?;
 
     println!("transformer_block: {:?}", output.to_cpu()?);
+
+    let x = GpuTensor::from_cpu(stream3.clone(), &vec![1.0f32, 2.0, 3.0, 4.0, 2.0, 3.0, 4.0, 5.0], vec![seq_len, dim])?;
+    let gamma = GpuTensor::from_cpu(stream3.clone(), &vec![1.0f32; dim], vec![dim])?;
+    let beta = GpuTensor::from_cpu(stream3.clone(), &vec![0.0f32; dim], vec![dim])?;
+    let vocab_size = 8;
+    let w_vocab = GpuTensor::from_cpu(stream3.clone(), &vec![
+        0.1f32, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8,
+        0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.1,
+        0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.1, 0.2,
+        0.4, 0.5, 0.6, 0.7, 0.8, 0.1, 0.2, 0.3,
+    ], vec![dim, vocab_size])?;
+
+    let logits = output_projections(&x, &gamma, &beta, &w_vocab, seq_len, dim, vocab_size)?;
+
+    println!("logits shape: {:?}", logits.shape);
+    println!("logits: {:?}", logits.to_cpu()?);
+
 
     Ok(())
 }
