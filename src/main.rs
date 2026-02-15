@@ -9,6 +9,7 @@ mod residual;
 mod gelu;
 mod ffn;
 mod layer_norm;
+mod transformer_block;
 
 use std::error::Error;
 use cudarc::driver::CudaContext;
@@ -23,6 +24,7 @@ use crate::matmul::{matmul, matmul_gpu, matmul_gpu_bt};
 use crate::residual::residual_add;
 use crate::scale::scale_gpu;
 use crate::softmax::{softmax_cudnn_gpu, softmax_cudnn_gpu_2d};
+use crate::transformer_block::transformer_block;
 
 fn main() -> Result<(), Box<dyn Error>> {
     const N: usize = 4096;
@@ -155,6 +157,29 @@ fn main() -> Result<(), Box<dyn Error>> {
 
     let output = layer_norm(&x, &gamma, &beta, 1e-5)?;
     println!("Layer norm {:?}", output.to_cpu());
+
+    let x = GpuTensor::from_cpu(stream3.clone(), &vec![1.0f32, 2.0, 3.0, 4.0, 2.0, 3.0, 4.0, 5.0], vec![seq_len, dim])?;
+    let gamma1 = GpuTensor::from_cpu(stream3.clone(), &vec![1.0f32; dim], vec![dim])?;
+    let beta1 = GpuTensor::from_cpu(stream3.clone(), &vec![0.0f32; dim], vec![dim])?;
+
+    let w_q = GpuTensor::from_cpu(stream.clone(), &vec![0.1f32, 0.2, 0.3, 0.4, 0.2, 0.1, 0.4, 0.3, 0.3, 0.4, 0.1, 0.2, 0.4, 0.3, 0.2, 0.1], vec![dim, dim])?;
+    let w_k = GpuTensor::from_cpu(stream.clone(), &vec![0.2f32, 0.1, 0.4, 0.3, 0.1, 0.2, 0.3, 0.4, 0.4, 0.3, 0.2, 0.1, 0.3, 0.4, 0.1, 0.2], vec![dim, dim])?;
+    let w_v = GpuTensor::from_cpu(stream.clone(), &vec![0.3f32, 0.4, 0.1, 0.2, 0.4, 0.3, 0.2, 0.1, 0.1, 0.2, 0.3, 0.4, 0.2, 0.1, 0.4, 0.3], vec![dim, dim])?;
+    let w_o = GpuTensor::from_cpu(stream.clone(), &vec![0.1f32, 0.3, 0.2, 0.4, 0.3, 0.1, 0.4, 0.2, 0.2, 0.4, 0.1, 0.3, 0.4, 0.2, 0.3, 0.1], vec![dim, dim])?;
+
+    let gamma2 = GpuTensor::from_cpu(stream3.clone(), &vec![1.0f32; dim], vec![dim])?;
+    let beta2 = GpuTensor::from_cpu(stream3.clone(), &vec![0.0f32; dim], vec![dim])?;
+    let hidden_dim = 8;
+
+    let output = transformer_block(
+        &x,
+        &gamma1, &beta1,
+        &w_q, &w_k, &w_v, &w_o,
+        &gamma2, &beta2,
+        &w1, &w2,
+        seq_len, dim, num_heads, hidden_dim)?;
+
+    println!("transformer_block: {:?}", output.to_cpu()?);
 
     Ok(())
 }

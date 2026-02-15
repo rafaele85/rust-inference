@@ -33,4 +33,14 @@ impl GpuTensor {
         let data = stream.alloc_zeros::<f32>(len)?;
         Ok(Self { data, shape, stream })
     }
+
+    pub fn copy(&self) -> Result<Self, Box<dyn Error>> {
+        let mut new_data = self.stream.alloc_zeros::<f32>(self.len())?;
+        self.stream.memcpy_dtod(&self.data, &mut new_data)?;
+        Ok(Self {
+            data: new_data,
+            shape: self.shape.clone(),
+            stream: self.stream.clone()
+        })
+    }
 }
