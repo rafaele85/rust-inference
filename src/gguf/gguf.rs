@@ -4,8 +4,9 @@ use std::collections::HashMap;
 use std::error::Error;
 use std::fs::File;
 use std::io::{Read, Seek};
+use std::slice::from_raw_parts;
 use crate::gguf::metadata::{read_metadata_entry, read_metadata_string, read_metadata_tensor, read_metadata_u32, read_metadata_u64, read_metadata_u64_short_array, GgufMetadataValue, TensorMetadata};
-use crate::gguf::tensor_data::{bytes_to_f32, read_tensor_data_raw, read_tensor_f32, read_tensor_q4_0};
+use crate::gguf::tensor_data::{bytes_to_f32, read_tensor_data_raw, read_tensor_f32, read_tensor_q4_0, read_tensor_q6_k};
 
 const GGUF_MAGIC: u32 = 0x46554747;
 
@@ -48,6 +49,7 @@ pub fn read_gguf_header(
     for _ in 0..tensor_count {
         let tensor_metadata = read_metadata_tensor(&mut file)?;
         tensor_metadata_map.insert(tensor_metadata.name.clone(), tensor_metadata);
+
     }
 
     let current_pos = file.stream_position()?;
@@ -62,32 +64,36 @@ pub fn read_gguf_header(
     if let Some(tensor) = tensor_metadata_map.get("blk.0.ffn_down.weight") {
         println!("Q4_0 tensor: dims={:?}, dtype={}", tensor.dims, tensor.dtype);
         let weights = read_tensor_q4_0(&mut file, tensor, data_start_offset)?;
-        println!("first 8: {:?}", &weights[..8]);
+        println!("q4_0 first 8: {:?}", &weights[..8]);
         println!("values [1000..1008]: {:?}", &weights[1000..1008]);
     }
 
     if let Some(tensor) = tensor_metadata_map.get("output.weight") {
-        let bytes = read_tensor_data_raw(&mut file, tensor, data_start_offset)?;
-        let mut dequant = Vec::new();
-        let ql = &bytes[0..128];
-        let qh = &bytes[128..192];
-        let scales = &bytes[192..208];
-        for i in 0..8 {
-            let lo4 = ql[i] & 0x0F;
-            let qh_byte = i / 4;
-            let qh_shift = (i % 4) * 2;
-            let hi2 = (qh[qh_byte] >> qh_shift) & 0x03;
-            let q6 = lo4 | (hi2 << 4);
-            let sub_block = i / 16;
-            let scale = scales[sub_block];
-            let d = bytes_to_f32([bytes[208], bytes[209]]);
-            let value = d * (scale as f32) * ((q6 as i32 - 32) as f32);
-            dequant.push(value);
-            println!("d={} value={}", d, value);
+        let weights = read_tensor_q6_k(&mut file, tensor, data_start_offset)?;
+
+        let mut f = File::open("python/ref_weights.bin").expect("Run Python script first!");
+        let mut buffer = Vec::new();
+        f.read_to_end(&mut buffer).unwrap();
+
+        // Cast bytes to f32 slice
+        let py_weights: &[f32] = unsafe {
+            from_raw_parts(buffer.as_ptr() as *const f32, buffer.len() / 4)
+        };
+
+        println!("q6_k ({}) first 8: {:?}", tensor.dtype, &weights[..8]);
+        // 3. Compare
+        let mut mismatches = 0;
+        for i in 0..weights.len().min(py_weights.len()) {
+            let r = weights[i];
+            let p = py_weights[i];
+            if (r - p).abs() > 1e-3 {
+                if mismatches < 5 {
+                    println!("Index {}: Rust {} != Py {}", i, r, p);
+                }
+                mismatches += 1;
+            }
         }
-        println!("first 8 {:?}", dequant);
-        println!("ql[0..8]: {:?}", &ql[0..8]);
-        println!("qh[0..2]: {:?}", &qh[0..2]);
+        println!("Total mismatches: {}", mismatches);
     }
 
 
