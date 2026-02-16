@@ -1,3 +1,5 @@
+//metadata.rs
+
 use std::error::Error;
 use std::fs::File;
 use std::io::Read;
@@ -15,6 +17,7 @@ pub enum GgufMetadataValue {
 pub struct TensorMetadata {
     pub name: String,
     pub n_dims: u32,
+    pub dtype: u32,
     pub dims: Vec<u64>,
     pub offset: u64,
 }
@@ -173,7 +176,6 @@ pub fn read_metadata_tensor(file: &mut File) -> Result<TensorMetadata, Box<dyn E
     let dtype = read_metadata_u32(file)?;
     let offset = read_metadata_u64(file)?;
 
-    println!("----name {} n_dims {:?} dims {:?} dtype {} offset {}", name, n_dims, dims.iter().take(5).map(|x| x.to_string()).collect::<Vec<_>>().join(","), dtype, offset);
-
-    Ok(TensorMetadata {name, n_dims, dims, offset})
+    Ok(TensorMetadata {name, n_dims, dims, dtype, offset})
 }
+
