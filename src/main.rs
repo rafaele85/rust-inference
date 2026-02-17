@@ -22,7 +22,7 @@ mod transpose;
 
 use std::error::Error;
 use cudarc::driver::CudaContext;
-use crate::attention::{attention_gpu, attention_multihead, attention_multihead_gpu};
+use crate::attention::{attention_gpu, attention_gqa, attention_multihead, attention_multihead_gpu};
 use crate::cuda_kernels::CudaKernels;
 use crate::embeddings::embeddings;
 use crate::ffn::{ffn, ffn_swiglu};
@@ -56,25 +56,27 @@ fn test_rope() -> Result<(), Box<dyn Error>> {
     let seq_len = 4;
     let dim = 2048;
     let num_heads = 32;
+    let num_kv_heads = 4;
+    let kv_dim = num_kv_heads * 64;
 
     let ctx = CudaContext::new(0)?;
     let stream = ctx.default_stream();
 
 
     let wq_data = transpose_2d(&load_f32_bin("python/attention_wq.bin"), dim, dim);
-    let wk_data = transpose_2d(&load_f32_bin("python/attention_wk.bin"), dim, dim);
-    let wv_data = transpose_2d(&load_f32_bin("python/attention_wv.bin"), dim, dim);
+    let wk_data = transpose_2d(&load_f32_bin("python/attention_wk.bin"), kv_dim, dim);
+    let wv_data = transpose_2d(&load_f32_bin("python/attention_wv.bin"), kv_dim, dim);
     let wo_data = transpose_2d(&load_f32_bin("python/attention_wo.bin"), dim, dim);
     let expected = load_f32_bin("python/attention_output.bin");
     let x_data = load_f32_bin("python/attention_x.bin");
 
     let x = GpuTensor::from_cpu(stream.clone(), &x_data, vec![seq_len, dim])?;
     let w_q = GpuTensor::from_cpu(stream.clone(), &wq_data, vec![dim, dim])?;
-    let w_k = GpuTensor::from_cpu(stream.clone(), &wk_data, vec![dim, dim])?;
-    let w_v = GpuTensor::from_cpu(stream.clone(), &wv_data, vec![dim, dim])?;
+    let w_k = GpuTensor::from_cpu(stream.clone(), &wk_data, vec![dim, kv_dim])?;
+    let w_v = GpuTensor::from_cpu(stream.clone(), &wv_data, vec![dim, kv_dim])?;
     let w_o = GpuTensor::from_cpu(stream.clone(), &wo_data, vec![dim, dim])?;
 
-    let output = attention_multihead_gpu(&x, &w_q, &w_k, &w_v, &w_o, seq_len, dim, num_heads)?;
+    let output = attention_gqa(&x, &w_q, &w_k, &w_v, &w_o, seq_len, dim, num_heads, num_kv_heads)?;
     let result = output.to_cpu()?;
 
     println!("Expected first 8: {:?}", &expected[0..8]);
