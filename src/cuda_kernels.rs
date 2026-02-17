@@ -18,6 +18,7 @@ pub struct CudaKernels {
     pub rms_norm: CudaFunction,
     pub silu: CudaFunction,
     pub mul: CudaFunction,
+    pub casual_mask: CudaFunction,
     pub blas: CudaBlas,
     pub cudnn_handle: cudnnHandle_t,
 }
@@ -34,6 +35,7 @@ impl CudaKernels {
         let rms_module = ctx.load_module(Ptx::from_file("kernels/rms.ptx"))?;
         let silu_module = ctx.load_module(Ptx::from_file("kernels/silu.ptx"))?;
         let mul_module = ctx.load_module(Ptx::from_file("kernels/mul.ptx"))?;
+        let casual_mask_module = ctx.load_module(Ptx::from_file("kernels/casual_mask.ptx"))?;
         Ok(Self {
             scale: scale_module.load_function("scale")?,
             extract_head: head_ops_module.load_function("extract_head")?,
@@ -46,6 +48,7 @@ impl CudaKernels {
             rms_norm: rms_module.load_function("rms")?,
             silu: silu_module.load_function("silu")?,
             mul: mul_module.load_function("mul")?,
+            casual_mask: casual_mask_module.load_function("casual_mask")?,
             blas: CudaBlas::new(ctx.default_stream())?,
             cudnn_handle: create_handle()?
         })

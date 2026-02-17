@@ -1,4 +1,5 @@
 use std::error::Error;
+use cudarc::driver::{LaunchConfig, PushKernelArg};
 use crate::cuda_kernels::{get_kernels};
 use crate::gpu_tensor::GpuTensor;
 use crate::head_ops::{combine_heads, extract_head};
@@ -280,6 +281,8 @@ pub fn attention_gqa (
     num_kv_heads: usize
 ) -> Result<GpuTensor, Box<dyn Error>> {
 
+    let cuda_kernels = get_kernels();
+
     let head_dim = dim / num_heads;
     let kv_dim = num_kv_heads * head_dim;
     let num_kv_groups = num_heads / num_kv_heads;
@@ -330,6 +333,23 @@ pub fn attention_gqa (
 
         let scale_factor = 1.0 / (head_dim as f32).sqrt();
         scale_gpu(&mut scores, scale_factor)?;
+
+        const BLOCK_SIZE: usize = 256;
+        let grid_size = (seq_len * seq_len + BLOCK_SIZE -1 ) / BLOCK_SIZE;
+
+        let config = LaunchConfig {
+            grid_dim: (grid_size as u32, 1, 1),
+            block_dim: (BLOCK_SIZE as u32, 1, 1),
+            shared_mem_bytes: 0
+        };
+
+        let mut builder = x.stream.launch_builder(&cuda_kernels.casual_mask);
+        builder.arg(&mut scores.data);
+        builder.arg(&seq_len);
+
+        unsafe { builder.launch(config) }?;
+
+
         softmax_cudnn_gpu_2d(&mut scores)?;
 
 
