@@ -219,15 +219,16 @@ pub fn attention_multihead_gpu (
         dim as i32
     )?;
 
-    rope(&mut k)?;
-    rope(&mut v)?;
-
     let mut head_outputs = GpuTensor::alloc_zeros(x.stream.clone(), seq_len * dim, vec![seq_len, dim])?;
 
     for h in 0..num_heads {
-        let q_head = extract_head(&q, seq_len, dim, head_dim, h)?;
-        let k_head = extract_head(&k, seq_len, dim, head_dim, h)?;
+        let mut q_head = extract_head(&q, seq_len, dim, head_dim, h)?;
+        let mut k_head = extract_head(&k, seq_len, dim, head_dim, h)?;
         let v_head = extract_head(&v, seq_len, dim, head_dim, h)?;
+
+        rope(&mut q_head);
+        rope(&mut k_head);
+
 
         let mut scores = matmul_gpu_bt(
             &q_head,

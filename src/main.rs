@@ -18,6 +18,8 @@ mod silu;
 mod mul;
 mod gguf;
 
+mod transpose;
+
 use std::error::Error;
 use cudarc::driver::CudaContext;
 use crate::attention::{attention_gpu, attention_multihead, attention_multihead_gpu};
@@ -37,7 +39,58 @@ use crate::rope::rope;
 use crate::scale::scale_gpu;
 use crate::silu::silu;
 use crate::softmax::{softmax_cudnn_gpu, softmax_cudnn_gpu_2d};
-use crate::transformer_block::{transformer_block, transformer_block_llama};
+use crate::transformer_block::{transformer_block_llama};
+use crate::transpose::{transpose_2d};
+
+fn load_f32_bin(path: &str) -> Vec<f32> {
+    let bytes = std::fs::read(path).unwrap();
+    let raw: Vec<f32> = bytes.chunks(4)
+        .map(|c| f32::from_le_bytes([c[0], c[1], c[2], c[3]]))
+        .collect();
+
+    println!("path {} wq len: {}", path, raw.len());
+    raw
+}
+
+fn test_rope() -> Result<(), Box<dyn Error>> {
+    let seq_len = 4;
+    let dim = 2048;
+    let num_heads = 32;
+
+    let ctx = CudaContext::new(0)?;
+    let stream = ctx.default_stream();
+
+
+    let wq_data = transpose_2d(&load_f32_bin("python/attention_wq.bin"), dim, dim);
+    let wk_data = transpose_2d(&load_f32_bin("python/attention_wk.bin"), dim, dim);
+    let wv_data = transpose_2d(&load_f32_bin("python/attention_wv.bin"), dim, dim);
+    let wo_data = transpose_2d(&load_f32_bin("python/attention_wo.bin"), dim, dim);
+    let expected = load_f32_bin("python/attention_output.bin");
+    let x_data = load_f32_bin("python/attention_x.bin");
+
+    let x = GpuTensor::from_cpu(stream.clone(), &x_data, vec![seq_len, dim])?;
+    let w_q = GpuTensor::from_cpu(stream.clone(), &wq_data, vec![dim, dim])?;
+    let w_k = GpuTensor::from_cpu(stream.clone(), &wk_data, vec![dim, dim])?;
+    let w_v = GpuTensor::from_cpu(stream.clone(), &wv_data, vec![dim, dim])?;
+    let w_o = GpuTensor::from_cpu(stream.clone(), &wo_data, vec![dim, dim])?;
+
+    let output = attention_multihead_gpu(&x, &w_q, &w_k, &w_v, &w_o, seq_len, dim, num_heads)?;
+    let result = output.to_cpu()?;
+
+    println!("Expected first 8: {:?}", &expected[0..8]);
+    println!("Got first 8:      {:?}", &result[0..8]);
+
+    let mut max_diff = 0.0f32;
+    for i in 0..result.len() {
+        let diff = (result[i] - expected[i]).abs();
+        if diff > max_diff {
+            max_diff = diff;
+        }
+    }
+    println!("Max difference: {}", max_diff);
+
+    Ok(())
+}
 
 fn main() -> Result<(), Box<dyn Error>> {
     const N: usize = 4096;
@@ -270,6 +323,16 @@ fn main() -> Result<(), Box<dyn Error>> {
     println!("transformer_block_llama: {:?}", output.to_cpu()?);
 
     read_gguf_header("tinyllama-1.1b-chat-v1.0.Q4_0.gguf")?;
+
+    let seq_len = 4;
+    let head_dim = 64;
+    let mut x = GpuTensor::from_cpu(stream3.clone(), &vec![1.0f32; seq_len * head_dim], vec![seq_len, head_dim])?;
+    rope(&mut x);
+    let result = x.to_cpu()?;
+    println!("pos0 first 8 {:?}", &result[0..8]);
+    println!("pos1 first 8 {:?}", &result[head_dim..head_dim+8]);
+
+    test_rope()?;
 
     Ok(())
 }

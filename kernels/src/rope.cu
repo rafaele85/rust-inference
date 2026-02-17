@@ -19,8 +19,8 @@ extern "C" __global__ void rope(
         float cos_theta = cosf(theta);
         float sin_theta = sinf(theta);
 
-        int idx0 = pos * dim + pair;
-        int idx1 = pos * dim + pair + half_dim;
+        int idx0 = pos * dim + pair * 2;
+        int idx1 = pos * dim + pair * 2 + 1;
 
         float x0 = x[idx0];
         float x1 = x[idx1];
