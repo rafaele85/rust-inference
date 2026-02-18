@@ -24,26 +24,311 @@ use std::error::Error;
 use std::fs::File;
 use cudarc::driver::CudaContext;
 use crate::attention::{attention_gpu, attention_gqa};
-use crate::cuda_kernels::CudaKernels;
-use crate::embeddings::embeddings;
-use crate::ffn::{ffn, ffn_swiglu};
-use crate::gelu::gelu;
 use crate::gguf::gguf::read_gguf_header;
 use crate::gguf::tensor_data::{read_tensor_f32, read_tensor_q4_0};
 use crate::gpu_tensor::GpuTensor;
-use crate::head_ops::{combine_heads, extract_head};
-use crate::layer_norm::layer_norm;
 use crate::matmul::{matmul_gpu, matmul_gpu_bt};
-use crate::output_projections::{arg_max, get_last_logits, output_projections};
 use crate::residual::residual_add;
 use crate::rms_norm::rms_norm;
 use crate::rope::rope;
-use crate::scale::scale_gpu;
-use crate::silu::silu;
-use crate::softmax::{softmax_cudnn_gpu, softmax_cudnn_gpu_2d};
 use crate::transformer_block::{transformer_block_llama};
 use crate::transpose::{transpose_2d};
 
+
+fn test_block_vs_hf() -> Result<(), Box<dyn Error>> {
+    let ctx = CudaContext::new(0)?;
+    let stream = ctx.default_stream();
+
+    let seq_len = 4usize;
+    let dim = 2048usize;
+    let num_heads = 32usize;
+    let num_kv_heads = 4usize;
+    let hidden_dim = 5632usize;
+    let kv_dim = num_kv_heads * (dim / num_heads);
+
+    let x = GpuTensor::from_cpu(stream.clone(), &load_f32_bin("python/test_data/hf_block_input.bin"), vec![seq_len, dim])?;
+    let gamma1 = GpuTensor::from_cpu(stream.clone(), &load_f32_bin("python/test_data/hf_block_gamma1.bin"), vec![dim])?;
+    let gamma2 = GpuTensor::from_cpu(stream.clone(), &load_f32_bin("python/test_data/hf_block_gamma2.bin"), vec![dim])?;
+    let w_q = GpuTensor::from_cpu(stream.clone(), &load_f32_bin("python/test_data/hf_block_wq.bin"), vec![dim, dim])?;
+    let w_k = GpuTensor::from_cpu(stream.clone(), &load_f32_bin("python/test_data/hf_block_wk.bin"), vec![dim, kv_dim])?;
+    let w_v = GpuTensor::from_cpu(stream.clone(), &load_f32_bin("python/test_data/hf_block_wv.bin"), vec![dim, kv_dim])?;
+    let w_o = GpuTensor::from_cpu(stream.clone(), &load_f32_bin("python/test_data/hf_block_wo.bin"), vec![dim, dim])?;
+    let w_gate = GpuTensor::from_cpu(stream.clone(), &load_f32_bin("python/test_data/hf_block_wgate.bin"), vec![dim, hidden_dim])?;
+    let w_up = GpuTensor::from_cpu(stream.clone(), &load_f32_bin("python/test_data/hf_block_wup.bin"), vec![dim, hidden_dim])?;
+    let w_down = GpuTensor::from_cpu(stream.clone(), &load_f32_bin("python/test_data/hf_block_wdown.bin"), vec![hidden_dim, dim])?;
+    let expected = load_f32_bin("python/test_data/hf_block_output.bin");
+
+    let output = transformer_block_llama(
+        &x, &gamma1, &gamma2,
+        &w_q, &w_k, &w_v, &w_o,
+        &w_gate, &w_up, &w_down,
+        seq_len, dim, num_heads, num_kv_heads, hidden_dim
+    )?;
+    let result = output.to_cpu()?;
+
+    println!("Expected first 8: {:?}", &expected[..8]);
+    println!("Got      first 8: {:?}", &result[..8]);
+
+    let max_diff: f32 = result.iter().zip(expected.iter())
+        .map(|(a, b)| (a - b).abs())
+        .fold(0.0f32, f32::max);
+    println!("Max diff: {}", max_diff);
+
+    for tol in [1e-4, 1e-3, 1e-2] {
+        let count = result.iter().zip(expected.iter())
+            .filter(|(a, b)| ((*a) - (*b)).abs() > tol)
+            .count();
+        println!("Values exceeding {}: {}/{}", tol, count, result.len());
+    }
+
+    assert!(max_diff < 1e-2, "Block vs HF FAILED: max_diff={}", max_diff);
+    println!("PASSED");
+
+    Ok(())
+}
+fn test_attention_vs_hf() -> Result<(), Box<dyn Error>> {
+    let ctx = CudaContext::new(0)?;
+    let stream = ctx.default_stream();
+
+    let seq_len = 4usize;
+    let dim = 2048usize;
+    let num_heads = 32usize;
+    let num_kv_heads = 4usize;
+    let head_dim = dim / num_heads;
+    let kv_dim = num_kv_heads * head_dim;
+
+    let attn_input = load_f32_bin("python/test_data/hf_attn_input.bin");
+    let wq_data = load_f32_bin("python/test_data/hf_attn_wq.bin");
+    let wk_data = load_f32_bin("python/test_data/hf_attn_wk.bin");
+    let wv_data = load_f32_bin("python/test_data/hf_attn_wv.bin");
+    let wo_data = load_f32_bin("python/test_data/hf_attn_wo.bin");
+    let expected = load_f32_bin("python/test_data/hf_attn_expected.bin");
+
+    let x = GpuTensor::from_cpu(stream.clone(), &attn_input, vec![seq_len, dim])?;
+    let w_q = GpuTensor::from_cpu(stream.clone(), &wq_data, vec![dim, dim])?;
+    let w_k = GpuTensor::from_cpu(stream.clone(), &wk_data, vec![dim, kv_dim])?;
+    let w_v = GpuTensor::from_cpu(stream.clone(), &wv_data, vec![dim, kv_dim])?;
+    let w_o = GpuTensor::from_cpu(stream.clone(), &wo_data, vec![dim, dim])?;
+
+    let output = attention_gqa(&x, &w_q, &w_k, &w_v, &w_o, seq_len, dim, num_heads, num_kv_heads)?;
+    let result = output.to_cpu()?;
+
+    println!("Expected first 8: {:?}", &expected[..8]);
+    println!("Got      first 8: {:?}", &result[..8]);
+
+    let max_diff: f32 = result.iter().zip(expected.iter())
+        .map(|(a, b)| (a - b).abs())
+        .fold(0.0f32, f32::max);
+    println!("Max diff: {}", max_diff);
+
+    // Count mismatches at various thresholds
+    for tol in [1e-3, 1e-2, 1e-1] {
+        let count = result.iter().zip(expected.iter())
+            .filter(|(a, b)| ((*a) - (*b)).abs() > tol)
+            .count();
+        println!("Values exceeding {}: {}/{}", tol, count, result.len());
+    }
+
+    assert!(max_diff < 1e-2, "Attention vs HF FAILED: max_diff={}", max_diff);
+    println!("PASSED");
+
+    Ok(())
+}
+
+fn test_rope_vs_hf() -> Result<(), Box<dyn Error>> {
+    let ctx = CudaContext::new(0)?;
+    let stream = ctx.default_stream();
+
+    let seq_len = 4usize;
+    let head_dim = 64usize;
+
+    // Test Q head 0
+    let q_pre = load_f32_bin("python/test_data/hf_q_head0_pre_rope.bin");
+    let q_expected = load_f32_bin("python/test_data/hf_q_head0_post_rope.bin");
+
+    let mut q_gpu = GpuTensor::from_cpu(stream.clone(), &q_pre, vec![seq_len, head_dim])?;
+    rope(&mut q_gpu)?;
+    let q_result = q_gpu.to_cpu()?;
+
+    println!("Q RoPE expected pos0 first 8: {:?}", &q_expected[..8]);
+    println!("Q RoPE got      pos0 first 8: {:?}", &q_result[..8]);
+    println!("Q RoPE expected pos1 first 8: {:?}", &q_expected[head_dim..head_dim+8]);
+    println!("Q RoPE got      pos1 first 8: {:?}", &q_result[head_dim..head_dim+8]);
+
+    let q_diff: f32 = q_result.iter().zip(q_expected.iter())
+        .map(|(a, b)| (a - b).abs())
+        .fold(0.0f32, f32::max);
+    println!("Q RoPE max diff: {}", q_diff);
+    assert!(q_diff < 1e-5, "Q RoPE FAILED: max_diff={}", q_diff);
+    println!("Q RoPE PASSED");
+
+    // Test K head 0
+    let k_pre = load_f32_bin("python/test_data/hf_k_head0_pre_rope.bin");
+    let k_expected = load_f32_bin("python/test_data/hf_k_head0_post_rope.bin");
+
+    let mut k_gpu = GpuTensor::from_cpu(stream.clone(), &k_pre, vec![seq_len, head_dim])?;
+    rope(&mut k_gpu)?;
+    let k_result = k_gpu.to_cpu()?;
+
+    println!("\nK RoPE expected pos1 first 8: {:?}", &k_expected[head_dim..head_dim+8]);
+    println!("K RoPE got      pos1 first 8: {:?}", &k_result[head_dim..head_dim+8]);
+
+    let k_diff: f32 = k_result.iter().zip(k_expected.iter())
+        .map(|(a, b)| (a - b).abs())
+        .fold(0.0f32, f32::max);
+    println!("K RoPE max diff: {}", k_diff);
+    assert!(k_diff < 1e-5, "K RoPE FAILED: max_diff={}", k_diff);
+    println!("K RoPE PASSED");
+
+    Ok(())
+}
+fn test_qkv_proj_vs_hf() -> Result<(), Box<dyn Error>> {
+    let ctx = CudaContext::new(0)?;
+    let stream = ctx.default_stream();
+
+    let seq_len = 4usize;
+    let dim = 2048usize;
+    let num_kv_heads = 4usize;
+    let head_dim = 64usize;
+    let kv_dim = num_kv_heads * head_dim;
+
+    let rms_data = load_f32_bin("python/test_data/hf_rms_output.bin");
+    let wq_data = load_f32_bin("python/test_data/hf_wq.bin");
+    let wk_data = load_f32_bin("python/test_data/hf_wk.bin");
+    let wv_data = load_f32_bin("python/test_data/hf_wv.bin");
+    let q_expected = load_f32_bin("python/test_data/hf_q_expected.bin");
+    let k_expected = load_f32_bin("python/test_data/hf_k_expected.bin");
+    let v_expected = load_f32_bin("python/test_data/hf_v_expected.bin");
+
+    let rms_out = GpuTensor::from_cpu(stream.clone(), &rms_data, vec![seq_len, dim])?;
+    let w_q = GpuTensor::from_cpu(stream.clone(), &wq_data, vec![dim, dim])?;
+    let w_k = GpuTensor::from_cpu(stream.clone(), &wk_data, vec![dim, kv_dim])?;
+    let w_v = GpuTensor::from_cpu(stream.clone(), &wv_data, vec![dim, kv_dim])?;
+
+    let q = matmul_gpu(&rms_out, &w_q, seq_len as i32, dim as i32, dim as i32)?;
+    let k = matmul_gpu(&rms_out, &w_k, seq_len as i32, kv_dim as i32, dim as i32)?;
+    let v = matmul_gpu(&rms_out, &w_v, seq_len as i32, kv_dim as i32, dim as i32)?;
+
+    let q_result = q.to_cpu()?;
+    let k_result = k.to_cpu()?;
+    let v_result = v.to_cpu()?;
+
+    for (name, result, expected) in [("Q", &q_result, &q_expected), ("K", &k_result, &k_expected), ("V", &v_result, &v_expected)] {
+        let max_diff: f32 = result.iter().zip(expected.iter())
+            .map(|(a, b)| (a - b).abs())
+            .fold(0.0f32, f32::max);
+        println!("{} expected first 8: {:?}", name, &expected[..8]);
+        println!("{} got      first 8: {:?}", name, &result[..8]);
+        println!("{} max diff: {}", name, max_diff);
+        assert!(max_diff < 1e-3, "{} projection FAILED: max_diff={}", name, max_diff);
+        println!("{} PASSED", name);
+    }
+
+    Ok(())
+}
+fn test_rms_norm_vs_hf() -> Result<(), Box<dyn Error>> {
+    let ctx = CudaContext::new(0)?;
+    let stream = ctx.default_stream();
+
+    let seq_len = 4usize;
+    let dim = 2048usize;
+
+    let x_data = load_f32_bin("python/test_data/hf_rms_input.bin");
+    let gamma_data = load_f32_bin("python/test_data/hf_rms_gamma.bin");
+    let expected = load_f32_bin("python/test_data/hf_rms_expected.bin");
+
+    let x = GpuTensor::from_cpu(stream.clone(), &x_data, vec![seq_len, dim])?;
+    let gamma = GpuTensor::from_cpu(stream.clone(), &gamma_data, vec![dim])?;
+
+    let output = rms_norm(&x, &gamma)?;
+    let result = output.to_cpu()?;
+
+    println!("Expected first 8: {:?}", &expected[..8]);
+    println!("Got      first 8: {:?}", &result[..8]);
+
+    let max_diff: f32 = result.iter().zip(expected.iter())
+        .map(|(a, b)| (a - b).abs())
+        .fold(0.0f32, f32::max);
+    println!("Max diff: {}", max_diff);
+    assert!(max_diff < 1e-4, "RMS norm vs HF FAILED: max_diff={}", max_diff);
+    println!("PASSED");
+
+    Ok(())
+}
+fn test_attention_gqa_kernel() -> Result<(), Box<dyn Error>> {
+    let ctx = CudaContext::new(0)?;
+    let stream = ctx.default_stream();
+
+    // Test 1: small
+    println!("\n=== GQA Small Test ===");
+    let seq_len = 4usize;
+    let dim = 32usize;
+    let num_heads = 4usize;
+    let num_kv_heads = 2usize;
+    let kv_dim = num_kv_heads * (dim / num_heads);
+
+    let x_data = load_f32_bin("python/test_data/gqa_x_small.bin");
+    let wq_data = load_f32_bin("python/test_data/gqa_wq_small.bin");
+    let wk_data = load_f32_bin("python/test_data/gqa_wk_small.bin");
+    let wv_data = load_f32_bin("python/test_data/gqa_wv_small.bin");
+    let wo_data = load_f32_bin("python/test_data/gqa_wo_small.bin");
+    let expected = load_f32_bin("python/test_data/gqa_expected_small.bin");
+
+    let x = GpuTensor::from_cpu(stream.clone(), &x_data, vec![seq_len, dim])?;
+    let w_q = GpuTensor::from_cpu(stream.clone(), &wq_data, vec![dim, dim])?;
+    let w_k = GpuTensor::from_cpu(stream.clone(), &wk_data, vec![dim, kv_dim])?;
+    let w_v = GpuTensor::from_cpu(stream.clone(), &wv_data, vec![dim, kv_dim])?;
+    let w_o = GpuTensor::from_cpu(stream.clone(), &wo_data, vec![dim, dim])?;
+
+    let output = attention_gqa(&x, &w_q, &w_k, &w_v, &w_o, seq_len, dim, num_heads, num_kv_heads)?;
+    let result = output.to_cpu()?;
+
+    println!("Expected first 8: {:?}", &expected[..8]);
+    println!("Got      first 8: {:?}", &result[..8]);
+
+    let max_diff: f32 = result.iter().zip(expected.iter())
+        .map(|(a, b)| (a - b).abs())
+        .fold(0.0f32, f32::max);
+    println!("Max diff: {}", max_diff);
+    assert!(max_diff < 1e-4, "GQA small test FAILED: max_diff={}", max_diff);
+    println!("PASSED");
+
+    // Test 2: realistic
+    println!("\n=== GQA Realistic Test ===");
+    let seq_len = 4usize;
+    let dim = 64usize;
+    let num_heads = 4usize;
+    let num_kv_heads = 2usize;
+    let kv_dim = num_kv_heads * (dim / num_heads);
+
+    let x_data = load_f32_bin("python/test_data/gqa_x_real.bin");
+    let wq_data = load_f32_bin("python/test_data/gqa_wq_real.bin");
+    let wk_data = load_f32_bin("python/test_data/gqa_wk_real.bin");
+    let wv_data = load_f32_bin("python/test_data/gqa_wv_real.bin");
+    let wo_data = load_f32_bin("python/test_data/gqa_wo_real.bin");
+    let expected = load_f32_bin("python/test_data/gqa_expected_real.bin");
+
+    let x = GpuTensor::from_cpu(stream.clone(), &x_data, vec![seq_len, dim])?;
+    let w_q = GpuTensor::from_cpu(stream.clone(), &wq_data, vec![dim, dim])?;
+    let w_k = GpuTensor::from_cpu(stream.clone(), &wk_data, vec![dim, kv_dim])?;
+    let w_v = GpuTensor::from_cpu(stream.clone(), &wv_data, vec![dim, kv_dim])?;
+    let w_o = GpuTensor::from_cpu(stream.clone(), &wo_data, vec![dim, dim])?;
+
+    let output = attention_gqa(&x, &w_q, &w_k, &w_v, &w_o, seq_len, dim, num_heads, num_kv_heads)?;
+    let result = output.to_cpu()?;
+
+    println!("Expected first 8: {:?}", &expected[..8]);
+    println!("Got      first 8: {:?}", &result[..8]);
+
+    let max_diff: f32 = result.iter().zip(expected.iter())
+        .map(|(a, b)| (a - b).abs())
+        .fold(0.0f32, f32::max);
+    println!("Max diff: {}", max_diff);
+    assert!(max_diff < 1e-4, "GQA realistic test FAILED: max_diff={}", max_diff);
+    println!("PASSED");
+
+    Ok(())
+}
 fn load_f32_bin(path: &str) -> Vec<f32> {
     let bytes = std::fs::read(path).unwrap();
     let raw: Vec<f32> = bytes.chunks(4)
@@ -265,176 +550,7 @@ fn test_rope() -> Result<(), Box<dyn Error>> {
 }
 
 fn main() -> Result<(), Box<dyn Error>> {
-    const N: usize = 4096;
-    let a_host: Vec<f32> = vec![1.0; N * N];
-    let b_host: Vec<f32> = vec![1.0; N * N];
 
-
-    let seq_len = 2;
-    const dim: usize = 4;
-    const num_heads: usize = 2;
-
-
-    let ctx = CudaContext::new(0)?;
-    let stream = ctx.default_stream();
-    let cuda_kernels = CudaKernels::new(&ctx)?;
-
-
-    let a = GpuTensor::from_cpu(stream.clone(), &vec![1.0f32; 6], vec![2, 3])?;
-    let b = GpuTensor::from_cpu(stream.clone(), &vec![1.0f32; 6], vec![3, 2])?;
-    let c = matmul_gpu(&a, &b, 2, 2, 3)?;
-    let result = c.to_cpu()?;
-    println!("Result of matmul_gpu {:?}", result);
-
-
-
-    let mut x = GpuTensor::from_cpu(stream.clone(), &vec![2.0f32, 4.0, 6.0, 8.0], vec![4])?;
-    scale_gpu(&mut x, 0.5)?;
-    let result = x.to_cpu()?;
-    println!("Result of scale_gpu {:?}", result);
-
-    let mut t = GpuTensor::from_cpu(stream.clone(), &vec![1.0, 2.0, 3.0, 4.0], vec![4])?;
-    softmax_cudnn_gpu(&mut t)?;
-    let result = t.to_cpu()?;
-    println!("Result of softmax_cudnn_gpu {:?}", result);
-
-    let mut scores = GpuTensor::from_cpu(stream.clone(), &vec![1.0, 2.0, 3.0, 4.0], vec![2, 2])?;
-    softmax_cudnn_gpu_2d(&mut scores)?;
-
-
-    let stream3 = ctx.default_stream();
-    let q = GpuTensor::from_cpu(stream3.clone(), &vec![1.0f32, 2.0, 3.0, 4.0, 5.0, 6.0], vec![2, 3])?;
-    // K: 2x3 matrix (will be transposed to 3x2)
-    let k = GpuTensor::from_cpu(stream3.clone(), &vec![1.0f32, 2.0, 3.0, 4.0, 5.0, 6.0], vec![2, 3])?;
-
-    let scores = matmul_gpu_bt(&q, &k, 2, 2, 3)?;
-    println!("matmul_gpu_bt: {:?}", scores.to_cpu()?);
-
-    let seq_len = 2;
-    let x = GpuTensor::from_cpu(stream3.clone(), &vec![1.0f32; seq_len * dim], vec![seq_len, dim])?;
-    let w_q = GpuTensor::from_cpu(stream3.clone(), &vec![1.0f32; dim * dim], vec![dim, dim])?;
-    let w_k = GpuTensor::from_cpu(stream3.clone(), &vec![1.0f32; dim * dim], vec![dim, dim])?;
-    let w_v = GpuTensor::from_cpu(stream3.clone(), &vec![1.0f32; dim * dim], vec![dim, dim])?;
-
-    let output = attention_gpu(&x, &w_q, &w_k, &w_v, seq_len, dim)?;
-    println!("attention_gpu: {:?}", output.to_cpu()?);
-
-    let data = [1.0f32, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0];
-    let t = GpuTensor::from_cpu(stream3.clone(), &data, vec![2, 4])?;
-    let head0 = extract_head(&t, 2, 4, 2, 0)?;
-    println!("head0: {:?}", head0.to_cpu());
-    let head1 = extract_head(&t, 2, 4, 2, 1)?;
-    println!("head1: {:?}", head1.to_cpu());
-
-    let mut combined = GpuTensor::from_cpu(stream3.clone(), &vec![0.0f32; 8], vec![2, 4])?;
-    combine_heads(&mut combined, &head0, 2, 4, 2, 0)?;
-    combine_heads(&mut combined, &head1, 2, 4, 2, 1)?;
-
-    println!("combined: {:?}", combined.to_cpu());
-
-    let seq_len = 2;
-
-
-    let mut a = GpuTensor::from_cpu(stream3.clone(), &vec![1.0f32, 2.0, 3.0, 4.0], vec![4])?;
-    let b = GpuTensor::from_cpu(stream3.clone(), &vec![10.0f32, 20.0, 30.0, 40.0], vec![4])?;
-    residual_add(&mut a, &b)?;
-    println!("Result of multi-head residual attention {:?}", a.to_cpu()?);
-
-    let mut x = GpuTensor::from_cpu(stream3.clone(), &vec![-2.0f32, -1.0, 0.0, 1.0, 2.0], vec![5])?;
-    gelu(&mut x)?;
-    println!("Result of gelu {:?}", x.to_cpu()?);
-
-    let hidden_dim = 8;
-
-    let x = GpuTensor::from_cpu(stream3.clone(), &vec![1.0f32; seq_len * dim], vec![seq_len, dim])?;
-    let w1 = GpuTensor::from_cpu(stream3.clone(), &vec![0.1f32; dim * hidden_dim], vec![dim, hidden_dim])?;
-    let w2 = GpuTensor::from_cpu(stream3.clone(), &vec![0.1f32; hidden_dim * dim], vec![hidden_dim, dim])?;
-
-    let output = ffn(&x, &w1, &w2, seq_len, dim, hidden_dim)?;
-    println!("ffn: {:?}", output.to_cpu()?);
-
-    let mut test = GpuTensor::from_cpu(stream3.clone(), &vec![0.4f32], vec![1])?;
-    gelu(&mut test)?;
-    println!("gelu(0.4): {:?}", test.to_cpu()?);
-
-    let x = GpuTensor::from_cpu(stream3.clone(), &vec![1.0f32, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0], vec![seq_len, dim])?;
-    let gamma = GpuTensor::from_cpu(stream3.clone(), &vec![1.0f32; dim], vec![dim])?;
-    let beta = GpuTensor::from_cpu(stream3.clone(), &vec![0.0f32; dim], vec![dim])?;
-
-    let output = layer_norm(&x, &gamma, &beta, 1e-5)?;
-    println!("Layer norm {:?}", output.to_cpu());
-
-    let x = GpuTensor::from_cpu(stream3.clone(), &vec![1.0f32, 2.0, 3.0, 4.0, 2.0, 3.0, 4.0, 5.0], vec![seq_len, dim])?;
-    let gamma = GpuTensor::from_cpu(stream3.clone(), &vec![1.0f32; dim], vec![dim])?;
-    let beta = GpuTensor::from_cpu(stream3.clone(), &vec![0.0f32; dim], vec![dim])?;
-    let vocab_size = 8;
-    let w_vocab = GpuTensor::from_cpu(stream3.clone(), &vec![
-        0.1f32, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8,
-        0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.1,
-        0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.1, 0.2,
-        0.4, 0.5, 0.6, 0.7, 0.8, 0.1, 0.2, 0.3,
-    ], vec![dim, vocab_size])?;
-
-    let logits = output_projections(&x, &gamma, &beta, &w_vocab, seq_len, dim, vocab_size)?;
-
-    let last_logits = get_last_logits(&logits)?;
-
-    let next_token = arg_max(last_logits.as_slice());
-
-    println!("logits shape: {:?}", logits.shape);
-    println!("next token: {}", next_token);
-
-    let vocab_size = 4;
-    let dim2 = 3;
-
-    let embed_table = GpuTensor::from_cpu(stream3.clone(), &vec![
-        0.1, 0.2, 0.3,
-        0.4, 0.5, 0.6,
-        0.7, 0.8, 0.9,
-        1.0, 1.1, 1.2
-    ], vec![vocab_size, dim2])?;
-
-    let token_ids = vec![2, 0, 3];
-
-    let embedded = embeddings(&token_ids, &embed_table)?;
-    println!("token_ids: {:?}", token_ids);
-    println!("embed_table: {:?}", embed_table.to_cpu()?);
-    println!("embeddings shape: {:?}", embedded.shape);
-    println!("embeddings: {:?}", embedded.to_cpu());
-
-    let mut x = GpuTensor::from_cpu(stream.clone(), &vec![1.0f32, 2.0, 3.0, 4.0, 1.0, 2.0, 3.0, 4.0], vec![seq_len, dim])?;
-    rope(&mut x)?;
-
-    println!("rope: {:?}", x.to_cpu()?);
-
-    let x = GpuTensor::from_cpu(stream.clone(), &vec![1.0f32, 2.0, 3.0, 4.0,   2.0, 4.0, 6.0, 8.0], vec![2, 4])?;
-    let gamma = GpuTensor::from_cpu(stream.clone(), &vec![1.0f32, 1.0, 1.0, 1.0], vec![4])?;
-    let out = rms_norm(&x, &gamma)?;
-
-    println!("Result of rms_norm {:?}", out.to_cpu()?);
-
-    let mut x = GpuTensor::from_cpu(stream3.clone(), &vec![-2.0f32, -1.0, 0.0, 1.0, 2.0], vec![5])?;
-    silu(&mut x)?;
-    println!("Result of silu {:?}", x.to_cpu()?);
-
-
-    let x = GpuTensor::from_cpu(stream3.clone(), &vec![
-        1.0f32, 2.0, 3.0, 4.0,
-        0.5, 1.0, 1.5, 2.0,
-    ], vec![seq_len, dim])?;
-
-    let w_gate = GpuTensor::from_cpu(stream3.clone(), &vec![0.1f32; dim*hidden_dim], vec![dim, hidden_dim])?;
-    let w_up = GpuTensor::from_cpu(stream3.clone(), &vec![0.2f32; dim*hidden_dim], vec![dim, hidden_dim])?;
-    let w_down = GpuTensor::from_cpu(stream3.clone(), &vec![0.1f32; dim*hidden_dim], vec![dim, hidden_dim])?;
-
-    let output = ffn_swiglu(&x, &w_gate, &w_up, &w_down, seq_len, dim, hidden_dim)?;
-
-    println!("output shape: {:?}", output.shape);
-    println!("ffn_swiglu {:?}", output.to_cpu()?);
-
-    test_layer0()?;
-
-    test_rope_kernel()?;
-
+    test_block_vs_hf()?;
     Ok(())
 }
