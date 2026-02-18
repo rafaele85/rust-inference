@@ -180,7 +180,7 @@ pub fn read_metadata_tensor(file: &mut File) -> Result<TensorMetadata, Box<dyn E
     Ok(TensorMetadata {name, n_dims, dims, dtype, offset})
 }
 
-pub fn get_u32(metadata: &HashMap<String, GgufMetadataValue>, key: &str) -> Result<usize, Box<dyn Error>> {
+pub fn get_metadata_u32(metadata: &HashMap<String, GgufMetadataValue>, key: &str) -> Result<usize, Box<dyn Error>> {
     match metadata.get(key) {
         Some(GgufMetadataValue::U32(v)) => Ok(*v as usize),
         _ => Err(format!("Missing or invalid key: {}", key).into()),

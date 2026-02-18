@@ -4,7 +4,7 @@ use std::fs::File;
 use std::sync::Arc;
 use cudarc::driver::{CudaContext, CudaStream};
 use crate::gguf::gguf::read_gguf_header;
-use crate::gguf::metadata::{get_u32, GgufMetadataValue, TensorMetadata};
+use crate::gguf::metadata::{get_metadata_u32, GgufMetadataValue, TensorMetadata};
 use crate::gguf::tensor_data::{load_tensor, read_tensor_f32, read_tensor_q4_0_transposed, read_tensor_q6_k};
 use crate::gpu_tensor::GpuTensor;
 
@@ -27,11 +27,11 @@ impl ModelConfig {
         };
 
         Ok(Self {
-            dim: get_u32(&metadata, "llama.embedding_length")?,
-            num_heads: get_u32(&metadata, "llama.attention.head_count")?,
-            num_kv_heads: get_u32(&metadata, "llama.attention.head_count_kv")?,
-            hidden_dim: get_u32(&metadata, "llama.feed_forward_length")?,
-            num_layers: get_u32(&metadata, "llama.block_count")?,
+            dim: get_metadata_u32(&metadata, "llama.embedding_length")?,
+            num_heads: get_metadata_u32(&metadata, "llama.attention.head_count")?,
+            num_kv_heads: get_metadata_u32(&metadata, "llama.attention.head_count_kv")?,
+            hidden_dim: get_metadata_u32(&metadata, "llama.feed_forward_length")?,
+            num_layers: get_metadata_u32(&metadata, "llama.block_count")?,
             vocab_size
         })
     }
