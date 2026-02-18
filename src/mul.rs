@@ -1,8 +1,9 @@
+use std::error::Error;
 use cudarc::driver::{LaunchConfig, PushKernelArg};
 use crate::cuda_kernels::get_kernels;
 use crate::gpu_tensor::GpuTensor;
 
-pub fn mul(a: &mut GpuTensor, b: &GpuTensor) -> Result<(), String> {
+pub fn mul(a: &mut GpuTensor, b: &GpuTensor) -> Result<(), Box<dyn Error>> {
     let kernels = get_kernels();
 
     let n = a.len();
@@ -17,9 +18,11 @@ pub fn mul(a: &mut GpuTensor, b: &GpuTensor) -> Result<(), String> {
     let mut builder = a.stream.launch_builder(&kernels.mul);
     builder.arg(&mut a.data);
     builder.arg(&b.data);
-    builder.arg(&n);
+    let i32_n = n as i32;
+    builder.arg(&i32_n);
 
-    unsafe {builder.launch(config)};
+
+    unsafe {builder.launch(config)}?;
 
     Ok(())
 }

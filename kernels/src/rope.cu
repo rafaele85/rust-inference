@@ -1,3 +1,4 @@
+// kernels/src/rope.cu
 #define ROPE_BASE_FREQ 10000.0f
 
 extern "C" __global__ void rope(
@@ -19,8 +20,8 @@ extern "C" __global__ void rope(
         float cos_theta = cosf(theta);
         float sin_theta = sinf(theta);
 
-        int idx0 = pos * dim + pair * 2;
-        int idx1 = pos * dim + pair * 2 + 1;
+        int idx0 = pos * dim + pair;
+        int idx1 = pos * dim + pair + half_dim;
 
         float x0 = x[idx0];
         float x1 = x[idx1];
@@ -28,5 +29,4 @@ extern "C" __global__ void rope(
         x[idx0] = x0 * cos_theta - x1 * sin_theta;
         x[idx1] = x1 * cos_theta + x0 * sin_theta;
    }
-
 }

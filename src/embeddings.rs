@@ -24,8 +24,11 @@ pub fn embeddings(token_ids: &[i32], embed_table: &GpuTensor) -> Result<GpuTenso
     builder.arg(&mut out.data);
     builder.arg(&token_ids_dev);
     builder.arg(&embed_table.data);
-    builder.arg(&seq_len);
-    builder.arg(&dim);
+    let i32_seq_len = seq_len as i32;
+    builder.arg(&i32_seq_len);
+    let i32_dim = dim as i32;
+    builder.arg(&i32_dim);
+
 
     unsafe { builder.launch(config) }?;
 

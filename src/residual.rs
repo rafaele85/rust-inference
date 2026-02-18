@@ -22,7 +22,9 @@ pub fn residual_add(
     let mut builder = a.stream.launch_builder(&cuda_kernels.residual_add);
     builder.arg(&mut a.data);
     builder.arg(&b.data);
-    builder.arg(&n);
+    let i32_n = n as i32;
+    builder.arg(&i32_n);
+
 
     unsafe {
         builder.launch(config)

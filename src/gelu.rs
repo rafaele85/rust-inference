@@ -17,7 +17,9 @@ pub fn gelu(x: &mut GpuTensor) -> Result<(), Box<dyn Error>> {
 
     let mut builder = x.stream.launch_builder(&cuda_kernels.gelu);
     builder.arg(&mut x.data);
-    builder.arg(&n);
+    let i32_n = n as i32;
+    builder.arg(&i32_n);
+
 
     unsafe {builder.launch(config)}?;
 

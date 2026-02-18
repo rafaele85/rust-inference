@@ -29,7 +29,7 @@ pub fn layer_norm(x: &GpuTensor, gamma: &GpuTensor, beta: &GpuTensor, epsilon: f
     builder.arg(&cols);
     builder.arg(&epsilon);
 
-    unsafe {  builder.launch(config); };
+    unsafe {  builder.launch(config) }?;
 
     Ok((out))
 }

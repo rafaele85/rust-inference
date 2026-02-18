@@ -15,7 +15,7 @@ pub fn extract_head(
 
     let out_size = seq_len * head_dim;
     let mut out_data = input.stream.alloc_zeros::<f32>(out_size)?;
-    let n = out_size as f32;
+    let n = out_size;
     const BLOCK_SIZE: u32 = 256;
 
     let grid_size = (n as u32 + BLOCK_SIZE - 1) / BLOCK_SIZE; // ceil n / BLOCK_SIZE
@@ -30,10 +30,14 @@ pub fn extract_head(
 
     builder.arg(&mut out_data);
     builder.arg(&input.data);
-    builder.arg(&seq_len);
-    builder.arg(&dim);
-    builder.arg(&head_dim);
-    builder.arg(&head_idx);
+    let i32_seq_len = seq_len as i32;
+    builder.arg(&i32_seq_len);
+    let i32_dim = dim as i32;
+    builder.arg(&i32_dim);
+    let i32_head_dim = head_dim as i32;
+    builder.arg(&i32_head_dim);
+    let i32_head_idx = head_idx as i32;
+    builder.arg(&i32_head_idx);
 
     unsafe {
         builder.launch(config)?;
@@ -72,10 +76,14 @@ pub fn combine_heads(
 
     builder.arg(&mut output.data);
     builder.arg(&head_out.data);
-    builder.arg(&seq_len);
-    builder.arg(&dim);
-    builder.arg(&head_dim);
-    builder.arg(&head_idx);
+    let i32_seq_len = seq_len as i32;
+    builder.arg(&i32_seq_len);
+    let i32_dim = dim as i32;
+    builder.arg(&i32_dim);
+    let i32_head_dim = head_dim as i32;
+    builder.arg(&i32_head_dim);
+    let i32_head_idx = head_idx as i32;
+    builder.arg(&i32_head_idx);
 
     unsafe {
         builder.launch(config)?;

@@ -21,7 +21,8 @@ pub fn scale_gpu(x: &mut GpuTensor, factor: f32) -> Result<(), Box<dyn Error>> {
     let mut builder = x.stream.launch_builder(&kernel);
     builder.arg(&mut x.data);
     builder.arg(&factor);
-    builder.arg(&n);
+    let i32_n = n as i32;
+    builder.arg(&i32_n);
 
     unsafe {builder.launch(config)}?;
 

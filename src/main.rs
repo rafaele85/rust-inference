@@ -23,7 +23,7 @@ mod transpose;
 use std::error::Error;
 use std::fs::File;
 use cudarc::driver::CudaContext;
-use crate::attention::{attention_gpu, attention_gqa, attention_multihead, attention_multihead_gpu};
+use crate::attention::{attention_gpu, attention_gqa};
 use crate::cuda_kernels::CudaKernels;
 use crate::embeddings::embeddings;
 use crate::ffn::{ffn, ffn_swiglu};
@@ -33,7 +33,7 @@ use crate::gguf::tensor_data::{read_tensor_f32, read_tensor_q4_0};
 use crate::gpu_tensor::GpuTensor;
 use crate::head_ops::{combine_heads, extract_head};
 use crate::layer_norm::layer_norm;
-use crate::matmul::{matmul, matmul_gpu, matmul_gpu_bt};
+use crate::matmul::{matmul_gpu, matmul_gpu_bt};
 use crate::output_projections::{arg_max, get_last_logits, output_projections};
 use crate::residual::residual_add;
 use crate::rms_norm::rms_norm;
@@ -52,6 +52,54 @@ fn load_f32_bin(path: &str) -> Vec<f32> {
 
     println!("path {} wq len: {}", path, raw.len());
     raw
+}
+
+// Add to main.rs or a test module
+fn test_rope_kernel() -> Result<(), Box<dyn Error>> {
+    let ctx = CudaContext::new(0)?;
+    let stream = ctx.default_stream();
+
+    // Test 1: small
+    let input = load_f32_bin("python/test_data/rope_input_small.bin");
+    let expected = load_f32_bin("python/test_data/rope_expected_small.bin");
+    let seq_len = 2;
+    let dim = 8;
+
+    let mut x = GpuTensor::from_cpu(stream.clone(), &input, vec![seq_len, dim])?;
+    rope(&mut x)?;
+    let result = x.to_cpu()?;
+
+    println!("RoPE small test:");
+    println!("  Expected: {:?}", &expected[..8]);
+    println!("  Got:      {:?}", &result[..8]);
+    let max_diff: f32 = result.iter().zip(expected.iter())
+        .map(|(a, b)| (a - b).abs())
+        .fold(0.0f32, f32::max);
+    println!("  Max diff: {}", max_diff);
+    assert!(max_diff < 1e-5, "Small RoPE test FAILED: max_diff={}", max_diff);
+    println!("  PASSED");
+
+    // Test 2: realistic
+    let input = load_f32_bin("python/test_data/rope_input_real.bin");
+    let expected = load_f32_bin("python/test_data/rope_expected_real.bin");
+    let seq_len = 4;
+    let dim = 64;
+
+    let mut x = GpuTensor::from_cpu(stream.clone(), &input, vec![seq_len, dim])?;
+    rope(&mut x)?;
+    let result = x.to_cpu()?;
+
+    println!("\nRoPE realistic test:");
+    println!("  Expected pos1 first 8: {:?}", &expected[dim..dim+8]);
+    println!("  Got      pos1 first 8: {:?}", &result[dim..dim+8]);
+    let max_diff: f32 = result.iter().zip(expected.iter())
+        .map(|(a, b)| (a - b).abs())
+        .fold(0.0f32, f32::max);
+    println!("  Max diff: {}", max_diff);
+    assert!(max_diff < 1e-5, "Realistic RoPE test FAILED: max_diff={}", max_diff);
+    println!("  PASSED");
+
+    Ok(())
 }
 
 fn test_layer0() -> Result<(), Box<dyn Error>> {
@@ -221,33 +269,11 @@ fn main() -> Result<(), Box<dyn Error>> {
     let a_host: Vec<f32> = vec![1.0; N * N];
     let b_host: Vec<f32> = vec![1.0; N * N];
 
-    let expected = N as f32;
-    let m = N as i32;
-    let n = N as i32;
-    let k = N as i32;
-
-    let c_host = matmul(a_host, b_host, m, n, k)?;
-
-    for (i, val) in c_host.iter().enumerate() {
-        if (val - expected).abs() > 0.01 {
-            println!("Mismatch at {}: expected {} received {}", i, expected, val);
-        }
-    }
-
-    println!("Result verified");
 
     let seq_len = 2;
     const dim: usize = 4;
     const num_heads: usize = 2;
 
-    let x = vec![1.0f32; seq_len * dim];
-    let w_q = [1.0; dim * dim];
-    let w_k = [1.0; dim * dim];
-    let w_v = [1.0; dim * dim];
-    let w_o = [1.0; dim * dim];
-    let output = attention_multihead(&x, &w_q, &w_k, &w_v, &w_o, seq_len, dim, num_heads);
-
-    println!("Result of multi-head attention {:?}", output);
 
     let ctx = CudaContext::new(0)?;
     let stream = ctx.default_stream();
@@ -274,8 +300,6 @@ fn main() -> Result<(), Box<dyn Error>> {
 
     let mut scores = GpuTensor::from_cpu(stream.clone(), &vec![1.0, 2.0, 3.0, 4.0], vec![2, 2])?;
     softmax_cudnn_gpu_2d(&mut scores)?;
-    let result = scores.to_cpu()?;
-    println!("Result of softmax_cudnn_gpu_2d {:?}", result);
 
 
     let stream3 = ctx.default_stream();
@@ -409,6 +433,8 @@ fn main() -> Result<(), Box<dyn Error>> {
     println!("ffn_swiglu {:?}", output.to_cpu()?);
 
     test_layer0()?;
+
+    test_rope_kernel()?;
 
     Ok(())
 }

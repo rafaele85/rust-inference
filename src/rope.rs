@@ -21,8 +21,10 @@ pub fn rope(x: &mut GpuTensor) -> Result<(), Box<dyn Error>> {
 
     let mut builder = x.stream.launch_builder(&cuda_kernels.rope);
     builder.arg(&mut x.data);
-    builder.arg(&seq_len);
-    builder.arg(&dim);
+    let i32_seq_len = seq_len as i32;
+    builder.arg(&i32_seq_len);
+    let i32_dim = dim as i32;
+    builder.arg(&i32_dim);
 
     unsafe { builder.launch(config) }?;
 

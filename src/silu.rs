@@ -20,7 +20,9 @@ pub fn silu(
 
     let mut builder = x.stream.launch_builder(&kernels.silu);
     builder.arg(&mut x.data);
-    builder.arg(&n);
+    let i32_n = n as i32;
+    builder.arg(&i32_n);
+
 
     unsafe {builder.launch(config)}?;
 
