@@ -5,18 +5,14 @@ use std::error::Error;
 use std::fs::File;
 use std::io::{Read, Seek};
 use std::slice::from_raw_parts;
-use crate::gguf::metadata::{read_metadata_entry, read_metadata_string, read_metadata_tensor, read_metadata_u32, read_metadata_u64, read_metadata_u64_short_array, GgufMetadataValue, TensorMetadata};
+use crate::gguf::metadata::{read_metadata_entry, read_metadata_tensor, read_metadata_u64, GgufMetadataValue, TensorMetadata};
 use crate::gguf::tensor_data::{read_tensor_f32, read_tensor_q4_0, read_tensor_q6_k};
 
 const GGUF_MAGIC: u32 = 0x46554747;
 
 
 
-pub fn read_gguf_header(
-    path: &str
-) -> Result<(HashMap<String, TensorMetadata>, u64), Box<dyn Error>> {
-
-    let mut file = File::open(path)?;
+pub fn read_gguf_header(file: &mut File) -> Result<(HashMap<String, GgufMetadataValue>, HashMap<String, TensorMetadata>, u64), Box<dyn Error>> {
 
     let mut buf4 = [0; 4];
     file.read_exact(&mut buf4)?;
@@ -27,29 +23,23 @@ pub fn read_gguf_header(
     }
 
     file.read_exact(&mut buf4)?;
-    println!("version: {:?}", buf4);
 
-    let tensor_count = read_metadata_u64(&mut file)?;
-    println!("Tensor count: {:?}", tensor_count);
+    let tensor_count = read_metadata_u64(file)?;
 
-    let kv_count = read_metadata_u64(&mut file)?;
-    println!("KV count: {:?}", kv_count);
+    let kv_count = read_metadata_u64(file)?;
 
     let mut headers_map: HashMap<String, GgufMetadataValue> = HashMap::new();
     for _ in 0..kv_count {
-        let (key, value) = read_metadata_entry(&mut file)?;
+        let (key, value) = read_metadata_entry(file)?;
         headers_map.insert(key, value);
     }
 
-    print!("map size = {}", headers_map.len());
-
-    println!("\n=== Tensors metadata ===");
-
     let mut tensor_metadata_map: HashMap<String, TensorMetadata> = HashMap::new();
     for _ in 0..tensor_count {
-        let tensor_metadata = read_metadata_tensor(&mut file)?;
-        tensor_metadata_map.insert(tensor_metadata.name.clone(), tensor_metadata);
-
+        let tensor_metadata = read_metadata_tensor(file)?;
+        let name = tensor_metadata.name.clone();
+        tensor_metadata_map.insert(name.clone(), tensor_metadata);
+        println!("Loaded tensor_metadata: {:?}", name);
     }
 
     let current_pos = file.stream_position()?;
@@ -57,23 +47,23 @@ pub fn read_gguf_header(
     let data_start_offset = ((current_pos + alignment - 1) / alignment) * alignment;
 
     if let Some(tensor) = tensor_metadata_map.get("blk.0.attn_norm.weight") {
-        let weights = read_tensor_f32(&mut file, tensor, data_start_offset)?;
+        let weights = read_tensor_f32(file, tensor, data_start_offset)?;
         println!("first 16: {:?}", &weights[..16]);
     }
 
     if let Some(tensor) = tensor_metadata_map.get("blk.0.ffn_down.weight") {
         println!("Q4_0 tensor: dims={:?}, dtype={}", tensor.dims, tensor.dtype);
-        let weights = read_tensor_q4_0(&mut file, tensor, data_start_offset)?;
+        let weights = read_tensor_q4_0(file, tensor, data_start_offset)?;
         println!("q4_0 first 8: {:?}", &weights[..8]);
         println!("values [1000..1008]: {:?}", &weights[1000..1008]);
     }
 
     if let Some(tensor) = tensor_metadata_map.get("output.weight") {
-        let weights = read_tensor_q6_k(&mut file, tensor, data_start_offset)?;
+        let weights = read_tensor_q6_k(file, tensor, data_start_offset)?;
 
         let mut f = File::open("python/ref_weights.bin").expect("Run Python script first!");
         let mut buffer = Vec::new();
-        f.read_to_end(&mut buffer).unwrap();
+        f.read_to_end(&mut buffer)?;
 
         // Cast bytes to f32 slice
         let py_weights: &[f32] = unsafe {
@@ -96,5 +86,5 @@ pub fn read_gguf_header(
         println!("Total mismatches: {}", mismatches);
     }
 
-    Ok((tensor_metadata_map, data_start_offset))
+    Ok((headers_map, tensor_metadata_map, data_start_offset))
 }

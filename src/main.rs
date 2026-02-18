@@ -19,6 +19,7 @@ mod mul;
 mod gguf;
 
 mod transpose;
+mod model;
 
 use std::error::Error;
 use std::fs::File;
@@ -28,6 +29,7 @@ use crate::gguf::gguf::read_gguf_header;
 use crate::gguf::tensor_data::{read_tensor_f32, read_tensor_q4_0};
 use crate::gpu_tensor::GpuTensor;
 use crate::matmul::{matmul_gpu, matmul_gpu_bt};
+use crate::model::load_gguf;
 use crate::residual::residual_add;
 use crate::rms_norm::rms_norm;
 use crate::rope::rope;
@@ -406,7 +408,8 @@ fn test_layer0() -> Result<(), Box<dyn Error>> {
 
 
 
-    let (tensor_metadata_map, data_start_offset) = read_gguf_header("tinyllama-1.1b-chat-v1.0.Q4_0.gguf")?;
+    let mut file = File::open("tinyllama-1.1b-chat-v1.0.Q4_0.gguf")?;
+    let (_, tensor_metadata_map, data_start_offset) = read_gguf_header(&mut file)?;
 
     let tensor_q = tensor_metadata_map.get("blk.0.attn_q.weight").unwrap();
     let tensor_k = tensor_metadata_map.get("blk.0.attn_k.weight").unwrap();
@@ -551,6 +554,10 @@ fn test_rope() -> Result<(), Box<dyn Error>> {
 
 fn main() -> Result<(), Box<dyn Error>> {
 
-    test_block_vs_hf()?;
+    let mut file = File::open("tinyllama-1.1b-chat-v1.0.Q4_0.gguf")?;
+    let ctx = CudaContext::new(0)?;
+    let stream = ctx.default_stream();
+
+    load_gguf(&mut file, stream)?;
     Ok(())
 }

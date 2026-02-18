@@ -4,6 +4,7 @@ use std::io::{Read, Seek};
 use std::io::SeekFrom::Start;
 use half::f16;
 use crate::gguf::metadata::TensorMetadata;
+use crate::transpose::transpose_2d;
 
 pub fn read_tensor_data_raw(file: &mut File, tensor: &TensorMetadata, data_start_offset: u64) -> Result<Vec<u8>, Box<dyn Error>> {
     let num_elements: u64 = tensor.dims.iter().product();
@@ -34,6 +35,13 @@ pub fn read_tensor_f32(file: &mut File, tensor: &TensorMetadata, data_start_offs
     Ok(values)
 }
 
+pub fn read_tensor_f32_transposed(file: &mut File, tensor: &TensorMetadata, data_start_offset: u64, rows: usize, cols: usize) -> Result<Vec<f32>, Box<dyn Error>> {
+    let raw = read_tensor_f32(file, tensor, data_start_offset)?;
+    let transposed = transpose_2d(&raw, rows, cols);
+    Ok(transposed)
+}
+
+
 pub fn bytes_to_f32(bytes: [u8; 2]) -> f32 {
     half::f16::from_le_bytes(bytes).to_f32()
 }
@@ -63,6 +71,12 @@ pub fn read_tensor_q4_0(file: &mut File, tensor: &TensorMetadata, data_start_off
     }
 
     Ok(out)
+}
+
+pub fn read_tensor_q4_0_transposed(file: &mut File, tensor: &TensorMetadata, data_start_offset: u64, rows: usize, cols: usize) -> Result<Vec<f32>, Box<dyn Error>> {
+    let raw = read_tensor_q4_0(file, tensor, data_start_offset)?;
+    let transposed = transpose_2d(&raw, rows, cols);
+    Ok(transposed)
 }
 
 pub fn dequantize_block_q6_k(bytes: &[u8]) -> Vec<f32> {
@@ -146,3 +160,16 @@ pub fn read_tensor_q6_k(file: &mut File, tensor: &TensorMetadata, data_start_off
 
     Ok(out)
 }
+
+pub fn load_tensor(file: &mut File, tensor: &TensorMetadata, data_start_offset: u64, rows: usize, cols: usize) -> Result<Vec<f32>, Box<dyn Error>> {
+    let tensor = if tensor.dtype == 0 {
+        read_tensor_f32_transposed(file, tensor, data_start_offset, rows, cols)?
+    } else if tensor.dtype == 2 {
+        read_tensor_q4_0_transposed(file, tensor, data_start_offset, rows, cols)?
+    } else {
+        return Err(format!("Invalid tensor data type: {}", tensor.dtype).into());
+    };
+
+    Ok(tensor)
+}
+

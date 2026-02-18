@@ -1,5 +1,6 @@
 //metadata.rs
 
+use std::collections::HashMap;
 use std::error::Error;
 use std::fs::File;
 use std::io::Read;
@@ -177,5 +178,12 @@ pub fn read_metadata_tensor(file: &mut File) -> Result<TensorMetadata, Box<dyn E
     let offset = read_metadata_u64(file)?;
 
     Ok(TensorMetadata {name, n_dims, dims, dtype, offset})
+}
+
+pub fn get_u32(metadata: &HashMap<String, GgufMetadataValue>, key: &str) -> Result<usize, Box<dyn Error>> {
+    match metadata.get(key) {
+        Some(GgufMetadataValue::U32(v)) => Ok(*v as usize),
+        _ => Err(format!("Missing or invalid key: {}", key).into()),
+    }
 }
 
