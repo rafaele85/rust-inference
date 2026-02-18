@@ -1,5 +1,5 @@
 use std::error::Error;
-use crate::attention::attention_multihead_gpu;
+use crate::attention::{attention_gqa, attention_multihead_gpu};
 use crate::ffn::{ffn, ffn_swiglu};
 use crate::gpu_tensor::GpuTensor;
 use crate::layer_norm::layer_norm;
@@ -52,12 +52,13 @@ pub fn transformer_block_llama(
     seq_len: usize,
     dim: usize,
     num_heads: usize,
+    num_kv_heads: usize,
     hidden_dim: usize
 ) -> Result<GpuTensor, Box<dyn Error>> {
 
     let x_norm = rms_norm(x, gamma1)?;
 
-    let attn_out = attention_multihead_gpu(&x_norm, w_q, w_k, w_v, w_o, seq_len, dim, num_heads)?;
+    let attn_out = attention_gqa(&x_norm, w_q, w_k, w_v, w_o, seq_len, dim, num_heads, num_kv_heads)?;
     let mut x = x.copy()?;
     residual_add(&mut x, &attn_out)?;
 

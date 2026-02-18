@@ -6,7 +6,7 @@ use std::fs::File;
 use std::io::{Read, Seek};
 use std::slice::from_raw_parts;
 use crate::gguf::metadata::{read_metadata_entry, read_metadata_string, read_metadata_tensor, read_metadata_u32, read_metadata_u64, read_metadata_u64_short_array, GgufMetadataValue, TensorMetadata};
-use crate::gguf::tensor_data::{bytes_to_f32, read_tensor_data_raw, read_tensor_f32, read_tensor_q4_0, read_tensor_q6_k};
+use crate::gguf::tensor_data::{read_tensor_f32, read_tensor_q4_0, read_tensor_q6_k};
 
 const GGUF_MAGIC: u32 = 0x46554747;
 
@@ -14,7 +14,7 @@ const GGUF_MAGIC: u32 = 0x46554747;
 
 pub fn read_gguf_header(
     path: &str
-) -> Result<HashMap<String, TensorMetadata>, Box<dyn Error>> {
+) -> Result<(HashMap<String, TensorMetadata>, u64), Box<dyn Error>> {
 
     let mut file = File::open(path)?;
 
@@ -96,6 +96,5 @@ pub fn read_gguf_header(
         println!("Total mismatches: {}", mismatches);
     }
 
-
-    Ok(tensor_metadata_map)
+    Ok((tensor_metadata_map, data_start_offset))
 }

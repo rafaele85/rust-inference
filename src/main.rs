@@ -21,6 +21,7 @@ mod gguf;
 mod transpose;
 
 use std::error::Error;
+use std::fs::File;
 use cudarc::driver::CudaContext;
 use crate::attention::{attention_gpu, attention_gqa, attention_multihead, attention_multihead_gpu};
 use crate::cuda_kernels::CudaKernels;
@@ -28,6 +29,7 @@ use crate::embeddings::embeddings;
 use crate::ffn::{ffn, ffn_swiglu};
 use crate::gelu::gelu;
 use crate::gguf::gguf::read_gguf_header;
+use crate::gguf::tensor_data::{read_tensor_f32, read_tensor_q4_0};
 use crate::gpu_tensor::GpuTensor;
 use crate::head_ops::{combine_heads, extract_head};
 use crate::layer_norm::layer_norm;
@@ -50,6 +52,126 @@ fn load_f32_bin(path: &str) -> Vec<f32> {
 
     println!("path {} wq len: {}", path, raw.len());
     raw
+}
+
+fn test_layer0() -> Result<(), Box<dyn Error>> {
+
+    println!("===========Load blk0=================");
+    let ctx = CudaContext::new(0)?;
+    let stream = ctx.default_stream();
+
+    let seq_len = 4;
+    let dim = 2048;
+    let num_heads = 32;
+    let num_kv_heads = 4;
+
+    let head_dim = dim / num_heads;  // 64
+    let kv_dim = num_kv_heads * head_dim;  // 4 * 64 = 256
+
+    let hidden_dim = 5632;
+
+
+
+
+    let (tensor_metadata_map, data_start_offset) = read_gguf_header("tinyllama-1.1b-chat-v1.0.Q4_0.gguf")?;
+
+    let tensor_q = tensor_metadata_map.get("blk.0.attn_q.weight").unwrap();
+    let tensor_k = tensor_metadata_map.get("blk.0.attn_k.weight").unwrap();
+    let tensor_v = tensor_metadata_map.get("blk.0.attn_v.weight").unwrap();
+    let tensor_o = tensor_metadata_map.get("blk.0.attn_output.weight").unwrap();
+
+
+    let mut file = File::open("tinyllama-1.1b-chat-v1.0.Q4_0.gguf")?;
+
+//    let w_q_data = &read_tensor_q4_0(&mut file, tensor_q, data_start_offset)?;        // [2048, 2048]
+
+    let w_q_raw = read_tensor_q4_0(&mut file, tensor_q, data_start_offset)?;
+    let w_q_data = transpose_2d(&w_q_raw, 2048, 2048);
+    println!("w_q[0]: {}", w_q_raw[0]);      // row 0, block 0, elem 0
+    println!("w_q[32]: {}", w_q_raw[32]);    // row 0, block 1, elem 0
+    println!("w_q[64]: {}", w_q_raw[64]);    // row 0, block 2, elem 0
+    println!("w_q[2048]: {}", w_q_raw[2048]); // row 1, block 0, elem 0
+
+
+    let w_k_data = transpose_2d(&read_tensor_q4_0(&mut file, tensor_k, data_start_offset)?, dim, kv_dim);     // [2048, 256]
+    let w_v_data = transpose_2d(&read_tensor_q4_0(&mut file, tensor_v, data_start_offset)?, dim, kv_dim);     // [2048, 256]
+    let w_o_data = transpose_2d(&read_tensor_q4_0(&mut file, tensor_o, data_start_offset)?, dim, dim);        // [2048, 2048]
+
+    println!("w_q: {}", w_q_data.len());  // Should be 2048*2048 = 4194304
+    println!("w_k: {}", w_k_data.len());  // Should be 2048*256 = 524288
+    println!("w_v: {}", w_v_data.len());  // Should be 2048*256 = 524288
+    println!("w_o: {}", w_o_data.len());  // Should be 2048*2048 = 4194304
+
+    let w_q = GpuTensor::from_cpu(stream.clone(), &w_q_data, vec![dim, dim])?;
+    let w_k = GpuTensor::from_cpu(stream.clone(), &w_k_data, vec![dim, kv_dim])?;
+    let w_v = GpuTensor::from_cpu(stream.clone(), &w_v_data, vec![dim, kv_dim])?;
+    let w_o = GpuTensor::from_cpu(stream.clone(), &w_o_data, vec![dim, dim])?;
+
+
+    let tensor_attn_norm = tensor_metadata_map.get("blk.0.attn_norm.weight").unwrap();
+    let tensor_ffn_norm = tensor_metadata_map.get("blk.0.ffn_norm.weight").unwrap();
+    let tensor_ffn_gate = tensor_metadata_map.get("blk.0.ffn_gate.weight").unwrap();
+    let tensor_ffn_up = tensor_metadata_map.get("blk.0.ffn_up.weight").unwrap();
+    let tensor_ffn_down = tensor_metadata_map.get("blk.0.ffn_down.weight").unwrap();
+
+    let attn_norm_data = read_tensor_f32(&mut file, tensor_attn_norm, data_start_offset)?;
+    let ffn_norm_data = read_tensor_f32(&mut file, tensor_ffn_norm, data_start_offset)?;
+
+    let ffn_gate_data = transpose_2d(&read_tensor_q4_0(&mut file, tensor_ffn_gate, data_start_offset)?, dim, hidden_dim);
+    let ffn_up_data = transpose_2d(&read_tensor_q4_0(&mut file, tensor_ffn_up, data_start_offset)?, dim, hidden_dim);
+    let ffn_down_data = transpose_2d(&read_tensor_q4_0(&mut file, tensor_ffn_down, data_start_offset)?, hidden_dim, dim);
+
+    println!("attn_norm: {}", attn_norm_data.len());  // 2048
+    println!("ffn_norm: {}", ffn_norm_data.len());    // 2048
+    println!("ffn_gate: {}", ffn_gate_data.len());    // 2048*5632
+    println!("ffn_up: {}", ffn_up_data.len());        // 2048*5632
+    println!("ffn_down: {}", ffn_down_data.len());    // 5632*2048
+
+    let x_data: Vec<f32> = (0..seq_len * dim).map(|i| (i as f32 * 0.001).sin()).collect();
+    let x = GpuTensor::from_cpu(stream.clone(), &x_data, vec![seq_len, dim])?;
+    let output = attention_gqa(&x, &w_q, &w_k, &w_v, &w_o, seq_len, dim, num_heads, num_kv_heads)?;
+    let result = output.to_cpu()?;
+
+    println!("layer0 output shape {:?}", &output.shape);
+    println!("layer0 first 8 {:?}", &result[0..8]);
+    println!("layer0 attn_norm: {}", attn_norm_data.len());  // 2048
+    println!("layer0 ffn_norm: {}", ffn_norm_data.len());    // 2048
+    println!("layer0 ffn_gate: {}", ffn_gate_data.len());    // 2048*5632
+    println!("layer0 ffn_up: {}", ffn_up_data.len());        // 2048*5632
+    println!("layer0 ffn_down: {}", ffn_down_data.len());    // 5632*2048
+
+    let attn_norm = GpuTensor::from_cpu(stream.clone(), &attn_norm_data, vec![dim])?;
+    let ffn_norm = GpuTensor::from_cpu(stream.clone(), &ffn_norm_data, vec![dim])?;
+    let ffn_gate = GpuTensor::from_cpu(stream.clone(), &ffn_gate_data, vec![dim, hidden_dim])?;
+    let ffn_up = GpuTensor::from_cpu(stream.clone(), &ffn_up_data, vec![dim, hidden_dim])?;
+    let ffn_down = GpuTensor::from_cpu(stream.clone(), &ffn_down_data, vec![hidden_dim, dim])?;
+
+    let x_norm = rms_norm(&x, &attn_norm)?;
+    println!("After RMSNorm, first 8: {:?}", &x_norm.to_cpu()?[..8]);
+    let q = matmul_gpu(&x_norm, &w_q, seq_len as i32, dim as i32, dim as i32)?;
+    println!("Q proj output (no transpose), first 8: {:?}", &q.to_cpu()?[..8]);
+    let attn_out = attention_gqa(&x_norm, &w_q, &w_k, &w_v, &w_o, seq_len, dim, num_heads, num_kv_heads)?;
+    println!("Attention output, first 8: {:?}", &attn_out.to_cpu()?[..8]);
+    let mut output = x.copy()?;
+    residual_add(&mut output, &attn_out)?;
+
+    println!("After attention + residual, first 8: {:?}", &output.to_cpu()?[..8]);
+    let output = transformer_block_llama(
+        &x,
+        &attn_norm, &ffn_norm,
+        &w_q, &w_k, &w_v, &w_o,
+        &ffn_gate, &ffn_up, &ffn_down,
+        seq_len, dim, num_heads, num_kv_heads, hidden_dim
+    )?;
+
+    println!("Block 0 output shape: {:?}", output.shape);
+    println!("Block 0 first 8: {:?}", &output.to_cpu()?[..8]);
+
+    println!("GGUF first 8: {:?}", &w_q_data[..8]);
+    println!("GGUF stride 2048: {:?}", (0..8).map(|i| w_q_data[i * 2048]).collect::<Vec<_>>());
+
+
+    Ok(())
 }
 
 fn test_rope() -> Result<(), Box<dyn Error>> {
@@ -261,17 +383,6 @@ fn main() -> Result<(), Box<dyn Error>> {
 
     println!("rope: {:?}", x.to_cpu()?);
 
-
-    let x = GpuTensor::from_cpu(stream3.clone(), &vec![1.0f32, 2.0, 3.0, 4.0, 2.0, 3.0, 4.0, 5.0], vec![seq_len, dim])?;
-    let w_q = GpuTensor::from_cpu(stream.clone(), &vec![0.1f32, 0.2, 0.3, 0.4, 0.2, 0.1, 0.4, 0.3, 0.3, 0.4, 0.1, 0.2, 0.4, 0.3, 0.2, 0.1], vec![dim, dim])?;
-    let w_k = GpuTensor::from_cpu(stream.clone(), &vec![0.2f32, 0.1, 0.4, 0.3, 0.1, 0.2, 0.3, 0.4, 0.4, 0.3, 0.2, 0.1, 0.3, 0.4, 0.1, 0.2], vec![dim, dim])?;
-    let w_v = GpuTensor::from_cpu(stream.clone(), &vec![0.3f32, 0.4, 0.1, 0.2, 0.4, 0.3, 0.2, 0.1, 0.1, 0.2, 0.3, 0.4, 0.2, 0.1, 0.4, 0.3], vec![dim, dim])?;
-    let w_o = GpuTensor::from_cpu(stream.clone(), &vec![0.1f32, 0.3, 0.2, 0.4, 0.3, 0.1, 0.4, 0.2, 0.2, 0.4, 0.1, 0.3, 0.4, 0.2, 0.3, 0.1], vec![dim, dim])?;
-
-
-    let output = attention_multihead_gpu(&x, &w_q, &w_k, &w_v, &w_o, seq_len, dim, num_heads)?;
-    println!("Result of multi-head attention {:?}", output.to_cpu()?);
-
     let x = GpuTensor::from_cpu(stream.clone(), &vec![1.0f32, 2.0, 3.0, 4.0,   2.0, 4.0, 6.0, 8.0], vec![2, 4])?;
     let gamma = GpuTensor::from_cpu(stream.clone(), &vec![1.0f32, 1.0, 1.0, 1.0], vec![4])?;
     let out = rms_norm(&x, &gamma)?;
@@ -297,44 +408,7 @@ fn main() -> Result<(), Box<dyn Error>> {
     println!("output shape: {:?}", output.shape);
     println!("ffn_swiglu {:?}", output.to_cpu()?);
 
-
-    let x = GpuTensor::from_cpu(stream3.clone(), &vec![1.0f32, 2.0, 3.0, 4.0, 0.5, 1.0, 1.5, 2.0], vec![seq_len, dim])?;
-    let gamma1 = GpuTensor::from_cpu(stream3.clone(), &vec![1.0f32; dim], vec![dim])?;
-    let gamma2 = GpuTensor::from_cpu(stream3.clone(), &vec![1.0f32; dim], vec![dim])?;
-
-    let w_q = GpuTensor::from_cpu(stream.clone(), &vec![0.1f32, 0.2, 0.3, 0.4, 0.2, 0.1, 0.4, 0.3, 0.3, 0.4, 0.1, 0.2, 0.4, 0.3, 0.2, 0.1], vec![dim, dim])?;
-    let w_k = GpuTensor::from_cpu(stream.clone(), &vec![0.2f32, 0.1, 0.4, 0.3, 0.1, 0.2, 0.3, 0.4, 0.4, 0.3, 0.2, 0.1, 0.3, 0.4, 0.1, 0.2], vec![dim, dim])?;
-    let w_v = GpuTensor::from_cpu(stream.clone(), &vec![0.3f32, 0.4, 0.1, 0.2, 0.4, 0.3, 0.2, 0.1, 0.1, 0.2, 0.3, 0.4, 0.2, 0.1, 0.4, 0.3], vec![dim, dim])?;
-    let w_o = GpuTensor::from_cpu(stream.clone(), &vec![0.1f32, 0.3, 0.2, 0.4, 0.3, 0.1, 0.4, 0.2, 0.2, 0.4, 0.1, 0.3, 0.4, 0.2, 0.3, 0.1], vec![dim, dim])?;
-
-    let hidden_dim = 8;
-
-    let w_gate = GpuTensor::from_cpu(stream.clone(), &vec![0.1f32; dim * hidden_dim], vec![dim, hidden_dim])?;
-    let w_up = GpuTensor::from_cpu(stream.clone(), &vec![0.1f32; dim * hidden_dim], vec![dim, hidden_dim])?;
-    let w_down = GpuTensor::from_cpu(stream.clone(), &vec![0.1f32; hidden_dim * dim], vec![hidden_dim, dim])?;
-
-
-
-    let output = transformer_block_llama(
-        &x,
-        &gamma1, &gamma2,
-        &w_q, &w_k, &w_v, &w_o,
-        &w_gate, &w_up, &w_down,
-        seq_len, dim, num_heads, hidden_dim)?;
-
-    println!("transformer_block_llama: {:?}", output.to_cpu()?);
-
-    read_gguf_header("tinyllama-1.1b-chat-v1.0.Q4_0.gguf")?;
-
-    let seq_len = 4;
-    let head_dim = 64;
-    let mut x = GpuTensor::from_cpu(stream3.clone(), &vec![1.0f32; seq_len * head_dim], vec![seq_len, head_dim])?;
-    rope(&mut x);
-    let result = x.to_cpu()?;
-    println!("pos0 first 8 {:?}", &result[0..8]);
-    println!("pos1 first 8 {:?}", &result[head_dim..head_dim+8]);
-
-    test_rope()?;
+    test_layer0()?;
 
     Ok(())
 }
