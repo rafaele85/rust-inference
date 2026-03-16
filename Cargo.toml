@@ -4,6 +4,6 @@ version = "0.1.0"
 edition = "2024"
 
 [dependencies]
-cudarc = { version = "0.17", features = ["cuda-12090", "cublas", "cudnn"] }
+cudarc = { version = "0.17", features = ["cuda-12020", "cublas", "cudnn"] }
 memmap2 = "0.9"
 half = "2.7.1"
