@@ -1,0 +1,5 @@
+torch>=2.0
+transformers>=4.35
+
+# For generate_inference_test_gguf.py (GGUF-based inference test)
+llama-cpp-python>=0.2

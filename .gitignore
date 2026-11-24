@@ -1,4 +1,7 @@
 /target
 .idea
 python
+!python/test_data
+!python/generate_test_data.py
 *.gguf
+.venv
